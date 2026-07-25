@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.0 · compilado em 2026-07-25T22:18:03.167Z */
+   Versão 1.2.2 · compilado em 2026-07-25T23:11:50.472Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.2";
 const APP_BUILD = "2026-07-25";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -2321,6 +2321,179 @@ function Legend({
       }
     }, pct, "%")));
   }));
+}
+
+/* dados do "fluxo do mês": as entradas se dividindo em gastos por categoria, investimento e sobra — a
+   mesma informação de "Gastos por categoria", só lida de ponta a ponta em vez de fatia isolada. Sobra
+   negativa (gastou mais do que entrou) não vira nó do fluxo — largura de faixa não pode ser negativa —,
+   fica de fora do desenho e é avisada à parte, pra a geometria nunca quebrar. */
+function buildMonthFlow(totals, byCatChart) {
+  if (!totals || totals.inc <= 0) return null;
+  const CAP = 5; // categorias de sobra viram "Outros gastos" — mantém o desenho legível (Fase de design: teto de série)
+  const nodes = byCatChart.slice(0, CAP).map(c => ({
+    name: c.name,
+    value: c.value,
+    color: c.color
+  }));
+  const restValue = byCatChart.slice(CAP).reduce((s, c) => s + c.value, 0);
+  if (restValue > 0) nodes.push({
+    name: "Outros gastos",
+    value: restValue,
+    color: "var(--text-mut)"
+  });
+  if (totals.inv > 0) nodes.push({
+    name: "Investido",
+    value: totals.inv,
+    color: "var(--inv)"
+  });
+  if (totals.saldo > 0) nodes.push({
+    name: "Sobrou",
+    value: totals.saldo,
+    color: "var(--pos)"
+  });
+  const shown = nodes.reduce((s, n) => s + n.value, 0);
+  if (shown <= 0) return null;
+  return {
+    inc: totals.inc,
+    nodes,
+    deficit: totals.saldo < 0 ? -totals.saldo : 0,
+    shown
+  };
+}
+
+/* diagrama de fluxo do mês: as entradas à esquerda, categorias de gasto + investido + sobra à direita,
+   ligadas por faixas cuja espessura é proporcional ao valor. Clique numa faixa ou na legenda destaca
+   (mesmo padrão de clique-pra-selecionar do Donut/Legend, sem filtrar nada — é só leitura). */
+function MonthFlow({
+  totals,
+  byCatChart,
+  monthLabel
+}) {
+  const [active, setActive] = useState(null);
+  const flow = useMemo(() => buildMonthFlow(totals, byCatChart), [totals, byCatChart]);
+  if (!flow) return null;
+  const {
+    inc,
+    nodes,
+    deficit,
+    shown
+  } = flow;
+  const toggle = name => setActive(a => a === name ? null : name);
+  const VB_W = 480,
+    VB_H = 200,
+    NODE_W = 10,
+    GAP = 4,
+    PAD = 6,
+    LABEL_MIN_H = 15;
+  const RIGHT_X = VB_W - 96;
+  const usableH = VB_H - PAD * 2;
+  const scale = usableH / Math.max(inc, shown);
+  const leftH = inc * scale;
+  // as faixas nascem de fatias contíguas do nó de entradas — como há uma única origem, elas nunca se
+  // cruzam. Quando falta dinheiro (deficit>0) essas fatias ficam proporcionalmente mais estreitas que o
+  // destino de verdade, e a faixa "abre" ao longo do caminho — o próprio desenho avisa que gastou mais
+  // do que entrou, sem precisar de nó negativo.
+  const leftSliceScale = leftH / shown;
+  let cursorRight = PAD,
+    cursorLeft = PAD;
+  const laid = nodes.map(n => {
+    const rh = Math.max(n.value * scale, 5);
+    const ry0 = cursorRight,
+      ry1 = ry0 + rh;
+    cursorRight = ry1 + GAP;
+    const lh = n.value * leftSliceScale;
+    const ly0 = cursorLeft,
+      ly1 = ly0 + lh;
+    cursorLeft = ly1;
+    return {
+      ...n,
+      ry0,
+      ry1,
+      ly0,
+      ly1
+    };
+  });
+  const midX = (NODE_W + RIGHT_X) / 2;
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 14
+    }
+  }, brl(inc), " entraram em ", monthLabel, " — veja para onde foram."), /*#__PURE__*/React.createElement("svg", {
+    width: "100%",
+    viewBox: `0 0 ${VB_W} ${VB_H}`,
+    role: "img",
+    style: {
+      overflow: "visible",
+      display: "block"
+    },
+    "aria-label": `Fluxo de ${brl(inc)} entre gastos, investimento e sobra em ${monthLabel}`
+  }, /*#__PURE__*/React.createElement("rect", {
+    x: 0,
+    y: PAD,
+    width: NODE_W,
+    height: Math.max(leftH, 2),
+    rx: 2,
+    fill: "var(--pos)"
+  }), laid.map(n => {
+    const dim = active && active !== n.name;
+    const path = `M ${NODE_W},${n.ly0} C ${midX},${n.ly0} ${midX},${n.ry0} ${RIGHT_X},${n.ry0} L ${RIGHT_X},${n.ry1} C ${midX},${n.ry1} ${midX},${n.ly1} ${NODE_W},${n.ly1} Z`;
+    return /*#__PURE__*/React.createElement("g", {
+      key: n.name,
+      className: "flowribbon",
+      style: {
+        cursor: "pointer"
+      },
+      tabIndex: 0,
+      role: "button",
+      "aria-label": `${n.name}: ${brl(n.value)}, ${Math.round(n.value / shown * 100)}% das entradas`,
+      onClick: () => toggle(n.name),
+      onKeyDown: e => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggle(n.name);
+        }
+      }
+    }, /*#__PURE__*/React.createElement("path", {
+      d: path,
+      fill: n.color,
+      style: {
+        opacity: dim ? .15 : .55,
+        transition: "opacity .15s"
+      }
+    }), /*#__PURE__*/React.createElement("rect", {
+      className: "flownode",
+      x: RIGHT_X,
+      y: n.ry0,
+      width: NODE_W,
+      height: n.ry1 - n.ry0,
+      rx: 2,
+      fill: n.color,
+      style: {
+        opacity: dim ? .28 : 1,
+        transition: "opacity .15s"
+      }
+    }), n.ry1 - n.ry0 >= LABEL_MIN_H && /*#__PURE__*/React.createElement("text", {
+      x: RIGHT_X + NODE_W + 8,
+      y: (n.ry0 + n.ry1) / 2,
+      dominantBaseline: "middle",
+      fill: "var(--text-mut)",
+      style: {
+        fontSize: 10,
+        fontFamily: "'IBM Plex Mono',monospace",
+        opacity: dim ? .35 : 1
+      }
+    }, abbrevBRL(n.value)));
+  })), /*#__PURE__*/React.createElement(Legend, {
+    data: nodes,
+    onSelect: toggle,
+    selected: active
+  }), deficit > 0 && /*#__PURE__*/React.createElement("p", {
+    className: "hint",
+    style: {
+      color: "var(--warn)"
+    }
+  }, "Gastou ", brl(deficit), " a mais do que entrou este mês — por isso \"Sobrou\" não aparece no fluxo."));
 }
 
 /* money input */
@@ -5313,7 +5486,13 @@ ${AI_SUMMARY_STYLE}`;
     className: "kk"
   }, "#", tg.tag), /*#__PURE__*/React.createElement("span", {
     className: "vv"
-  }, brl(tg.cents)))))));
+  }, brl(tg.cents)))))), totals.inc > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "card g-12"
+  }, /*#__PURE__*/React.createElement("h3", null, "Fluxo do mês"), /*#__PURE__*/React.createElement(MonthFlow, {
+    totals: totals,
+    byCatChart: byCatChart,
+    monthLabel: monthLabel
+  })));
 }
 Balanco = React.memo(Balanco); // evita re-renderizar a aba inteira quando o App re-renderiza por motivo alheio (tema, menu, scroll…)
 
