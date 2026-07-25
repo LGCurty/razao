@@ -12,7 +12,7 @@
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Raz%C3%A3o%20%E2%80%94%20finan%C3%A7as%20pessoais%22%2C%22short_name%22%3A%22Raz%C3%A3o%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%2308090D%22%2C%22theme_color%22%3A%22%2308090D%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%253D%2522http%253A%252F%252Fwww.w3.org%252F2000%252Fsvg%2522%2520viewBox%253D%25220%25200%252024%252024%2522%253E%253Crect%2520width%253D%252224%2522%2520height%253D%252224%2522%2520rx%253D%25226%2522%2520fill%253D%2522%252308090D%2522%252F%253E%253Cline%2520x1%253D%252212%2522%2520y1%253D%25224%2522%2520x2%253D%252212%2522%2520y2%253D%252220%2522%2520stroke%253D%2522%2523F76B3C%2522%2520stroke-width%253D%25222%2522%2520stroke-linecap%253D%2522round%2522%252F%253E%253Cline%2520x1%253D%25225%2522%2520y1%253D%25228%2522%2520x2%253D%252212%2522%2520y2%253D%25228%2522%2520stroke%253D%2522%2523F76B3C%2522%2520stroke-width%253D%25222%2522%2520stroke-linecap%253D%2522round%2522%252F%253E%253Cline%2520x1%253D%252212%2522%2520y1%253D%252215%2522%2520x2%253D%252220%2522%2520y2%253D%252215%2522%2520stroke%253D%2522%2523F76B3C%2522%2520stroke-width%253D%25222%2522%2520stroke-linecap%253D%2522round%2522%252F%253E%253Ccircle%2520cx%253D%25225%2522%2520cy%253D%252211%2522%2520r%253D%25222.4%2522%2520fill%253D%2522none%2522%2520stroke%253D%2522%2523F76B3C%2522%2520stroke-width%253D%25221.6%2522%252F%253E%253Ccircle%2520cx%253D%252220%2522%2520cy%253D%252218%2522%2520r%253D%25222.4%2522%2520fill%253D%2522none%2522%2520stroke%253D%2522%2523F76B3C%2522%2520stroke-width%253D%25221.6%2522%252F%253E%253C%252Fsvg%253E%22%2C%22sizes%22%3A%22any%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%2C%22purpose%22%3A%22any%22%7D%5D%7D" />
 
 <!-- Bibliotecas — hospedadas localmente em vendor/ (não dependem de CDN estar no ar pra abrir o app).
-     pdf.js NÃO é carregado aqui: só entra sob demanda, quando o Extrato Inteligente precisa ler um PDF
+     pdf.js NÃO é carregado aqui: só entra sob demanda, quando a importação do banco precisa ler um PDF
      (ver loadPdfJs() no JSX). O Babel também só é buscado se app.compiled.js não existir/falhar. -->
 <script src="vendor/react.production.min.js"></script>
 <script src="vendor/react-dom.production.min.js"></script>
@@ -90,7 +90,7 @@ body{background:#08090D}
 .rz .monthpill{position:relative;display:flex;align-items:center;gap:2px;background:var(--surface);border:1px solid var(--hairline);border-radius:999px;padding:3px;margin:0 auto;box-shadow:var(--shadow-card)}
 .rz .mbtn{border:none;background:transparent;width:28px;height:28px;border-radius:999px;cursor:pointer;color:var(--text);display:grid;place-items:center;transition:background .15s}
 .rz .mbtn:hover{background:var(--surface-2)}
-.rz .monthlabel{border:none;background:transparent;cursor:pointer;color:var(--text);font-size:13px;font-weight:600;padding:0 8px;min-width:118px;height:28px;text-align:center;text-transform:capitalize;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:999px;transition:background .15s}
+.rz .monthlabel{border:none;background:transparent;cursor:pointer;color:var(--text);font-size:13px;font-weight:600;padding:0 8px;min-width:118px;height:28px;text-align:center;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:999px;transition:background .15s}
 .rz .monthlabel:hover{background:var(--surface-2)}
 .rz .monthpop{position:absolute;top:40px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--hairline);border-radius:14px;padding:14px;box-shadow:0 24px 48px -16px rgba(0,0,0,.4);z-index:45;width:260px;max-width:88vw}
 .rz .mpyear{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
@@ -159,13 +159,20 @@ body{background:#08090D}
 .rz .tabcontent>.g-6{grid-column:span 6}
 .rz .tabcontent>.g-4{grid-column:span 4}
 @media (max-width:767px){.rz .tabcontent{gap:14px}.rz .tabcontent>.g-6,.rz .tabcontent>.g-4{grid-column:span 12}}
-.rz .dashtop{display:none}
+.rz .dashtop{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;grid-column:1/-1;margin-bottom:14px}
+.rz .dashtop>.hero{grid-column:span 12;margin-bottom:0}
+.rz .dashtop>.add{display:none}
 @media (min-width:1024px){
-  .rz .dashtop{display:grid;grid-template-columns:repeat(12,1fr);gap:20px;grid-column:1/-1;margin-bottom:20px}
-  .rz .dashtop>.hero{grid-column:span 5;margin-bottom:0}
-  .rz .dashtop>.add{grid-column:span 7;margin-bottom:0}
+  .rz .dashtop{gap:20px;margin-bottom:20px}
+  .rz .dashtop>.hero{grid-column:span 5}
+  .rz .dashtop>.add{display:block;grid-column:span 7;margin-bottom:0}
 }
 .rz .banner{background:var(--warn-bg);color:var(--warn);border-radius:11px;padding:10px 13px;font-size:12px;margin-bottom:16px;line-height:1.5;grid-column:1/-1}
+.rz .banner.upd{background:var(--accent-bg);color:var(--accent);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.rz .banner.upd span{flex:1;min-width:200px}
+.rz .banner.upd .sbtn{background:var(--surface);border-color:var(--accent);color:var(--accent)}
+.rz .versionline{font-size:11px;color:var(--text-mut);text-align:center;padding:14px 0 4px}
+.rz .navlbl2 .ver{opacity:.65}
 .rz .banner.err{background:var(--neg-bg);color:var(--neg)}
 
 /* ===================== hero (signature element) ===================== */
@@ -316,10 +323,10 @@ body{background:#08090D}
 
 .rz .budrow{padding:14px 0;border-bottom:1px solid var(--surface-2)}
 .rz .budrow:last-child{border-bottom:none}
-.rz .budrow .bh{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.rz .budrow .bname{font-size:14px;font-weight:500;display:flex;align-items:center;gap:7px}
-.rz .budrow .bval{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;font-size:13px}
-.rz .budrow .mm,.rz .mm{font-size:11px;color:var(--text-mut);margin-top:6px;line-height:1.5}
+.rz .bh{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.rz .bname{font-size:14px;font-weight:500;display:flex;align-items:center;gap:7px}
+.rz .bval{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;font-size:13px;white-space:nowrap}
+.rz .mm{font-size:11px;color:var(--text-mut);margin-top:6px;line-height:1.5}
 .rz .tag{font-size:11px;padding:2px 8px;border-radius:99px;font-weight:600}
 .rz .tag.ok{background:var(--pos-bg);color:var(--pos)}
 .rz .tag.warn{background:var(--warn-bg);color:var(--warn)}
@@ -358,7 +365,7 @@ body{background:#08090D}
 .rz .bargroups .grp{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;min-width:0}
 .rz .bargroups .bset{flex:1;display:flex;align-items:flex-end;justify-content:center;gap:3px;width:100%}
 .rz .bargroups .b{width:16px;max-width:30%;border-radius:4px 4px 0 0;min-height:2px;transition:height .4s cubic-bezier(.22,1,.36,1),opacity .15s}
-.rz .bargroups .lbl{font-size:11px;color:var(--text-mut);text-transform:capitalize;white-space:nowrap;transition:color .12s}
+.rz .bargroups .lbl{font-size:11px;color:var(--text-mut);white-space:nowrap;transition:color .12s}
 .rz .bargroups .grp-clickable{cursor:pointer;border-radius:8px;padding-top:4px;transition:background .12s}
 .rz .bargroups .grp-clickable:hover{background:var(--surface-2)}
 .rz .bargroups .grp-active .lbl{color:var(--accent);font-weight:600}
@@ -395,7 +402,7 @@ body{background:#08090D}
 .rz .airich li{font-size:14px;line-height:1.65;margin-bottom:5px}
 .rz .airich b{font-weight:600;color:var(--text)}
 
-/* ===================== IA pensando (Extrato Inteligente) =====================
+/* ===================== IA pensando (Importar do banco) =====================
    Painel de progresso da leitura dos documentos: um "orbe" pulsante com dois anéis girando,
    a barra de avanço com a porcentagem e a fase atual. Tudo puramente decorativo — quem manda
    na porcentagem é o estado real da fila. Respeita prefers-reduced-motion. */
@@ -531,6 +538,16 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    (Project Settings > API > "Project URL" e "anon public key".)
    Enquanto não preencher, o app roda em MODO LOCAL (só neste aparelho).
    ======================================================================= */
+/* =======================================================================
+   VERSÃO — os dois valores abaixo são reescritos automaticamente pelo
+   build.js a cada "node build.js"; não precisa (nem adianta) editar à mão.
+   O mesmo número vai para o nome do cache do service worker, então todo
+   build novo invalida o anterior e quem está com o site aberto recebe o
+   aviso de atualização.
+   ======================================================================= */
+const APP_VERSION = "1.2.0";
+const APP_BUILD = "2026-07-25";
+
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
 
@@ -541,7 +558,7 @@ const sb = (configured && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
 
-/* pdf.js é pesado (~1,4 MB com o worker) e só serve pro Extrato Inteligente — carregado sob demanda,
+/* pdf.js é pesado (~1,4 MB com o worker) e só serve pra importação do banco — carregado sob demanda,
    só na primeira vez que a pessoa realmente tenta ler um PDF, não no carregamento do app inteiro. */
 let pdfJsLoadPromise = null;
 function loadPdfJs(){
@@ -906,6 +923,11 @@ const uid = ()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 // linha, filtro (Fase 4), visão "gasto por tag" e autocompletar no formulário
 const extractTags = (description)=>{ const m=(description||"").match(/#(\w+)/g); return m ? [...new Set(m.map(s=>s.slice(1).toLowerCase()))] : []; };
 const fmtDateBR = (iso)=>new Date(iso+"T00:00:00").toLocaleDateString("pt-BR");
+// "julho de 2026" → "Julho de 2026". O CSS text-transform:capitalize maiusculiza TODA palavra e
+// devolvia "Julho De 2026"/"Jun. De 26", que em português está errado — só a primeira letra sobe.
+const capFirst = (t)=>{ const s=String(t||""); return s.charAt(0).toUpperCase()+s.slice(1); };
+// rótulo curto de mês para gráficos: "jun. de 26" → "jun 26"
+const shortMonthLabel = (d)=>d.toLocaleDateString("pt-BR",{month:"short",year:"2-digit"}).replace(/\./g,"").replace(" de ", " ");
 // soma n meses a uma data ISO, ajustando o dia se o mês de destino for mais curto (ex: 31/01 + 1 mês = 28 ou 29/02)
 const addMonthsISO = (iso, n)=>{
   const [y,m,d] = iso.split("-").map(Number);
@@ -1172,6 +1194,7 @@ const TAB_GROUPS = [
   { label:"Principal", items:[
     ["geral","Panorama","panorama"],
     ["balanco","Balanço","calendario"],
+    ["extrato","Importar do banco","extrato"],
   ]},
   { label:"Planejamento", items:[
     ["orcamento","Orçamento","orcamento"],
@@ -1179,7 +1202,6 @@ const TAB_GROUPS = [
     ["investimentos","Investimentos","investimentos"],
   ]},
   { label:"Ferramentas", items:[
-    ["extrato","Extrato Inteligente","extrato"],
     ["perguntar","Assistente","assistente"],
   ]},
   { label:"Configurações", items:[
@@ -1265,6 +1287,10 @@ function Sheet({ open, onClose, title, children, returnFocusRef }){
    precisar receber setTab/estado de navegação por prop — mesmo padrão pub-sub do toast/confirm ---- */
 let helpListener=null;
 function openHelp(sectionId){ helpListener && helpListener(sectionId); }
+// mesmo padrão do openHelp: deixa qualquer cartão mandar a pessoa para a aba certa (ex: o estado
+// vazio do Balanço oferecendo a importação do banco como caminho rápido)
+let tabListener=null;
+function goToTab(tab){ tabListener && tabListener(tab); }
 
 /* ---- diálogo de confirmação (substitui confirm()/exclusões silenciosas) ---- */
 let confirmListener=null;
@@ -1375,13 +1401,17 @@ function ConflictDialog({ open, message, onReload, onKeep, onClose }){
     </Sheet>
   );
 }
-function EmptyState({ icon, title, text, action }){
+function EmptyState({ icon, title, text, action, secondary }){
   return (
     <div className="empty">
       <div className="bigicon"><Icon name={icon} size={40}/></div>
       <h4>{title}</h4>
       <p>{text}</p>
-      {action && <button className="sbtn primary" style={{marginTop:14}} onClick={action.onClick}>{action.label}</button>}
+      {(action||secondary) &&
+        <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap",marginTop:14}}>
+          {action && <button className="sbtn primary" onClick={action.onClick}>{action.icon && <Icon name={action.icon} size={14}/>}{action.label}</button>}
+          {secondary && <button className="sbtn" onClick={secondary.onClick}>{secondary.label}</button>}
+        </div>}
     </div>
   );
 }
@@ -1665,6 +1695,7 @@ function App(){
   const [tab,setTab]=useState("balanco");
   const [helpTarget,setHelpTarget]=useState(null);
   useEffect(()=>{ helpListener=(sectionId)=>{ setHelpTarget(sectionId); setTab("ajuda"); }; return ()=>{ helpListener=null; }; },[]);
+  useEffect(()=>{ tabListener=(t)=>{ setTab(t); setMoreOpen(false); }; return ()=>{ tabListener=null; }; },[]);
   // popover do mês e menu "⋯" são mutuamente exclusivos por construção (só um valor guardado);
   // setMonthPicker/setMenu abaixo são compatíveis com o uso anterior (booleano ou função de toggle)
   const [activePopover,setActivePopover]=useState(null); // "month" | "menu" | null
@@ -1698,6 +1729,14 @@ function App(){
   },[activePopover]);
   const [moreOpen,setMoreOpen]=useState(false);
   const [settingsOpen,setSettingsOpen]=useState(false);
+  // aviso de versão nova: quem chama é o registro do service worker (no fim do arquivo), assim que
+  // termina de baixar um build mais recente. Nada recarrega sozinho — a decisão é de quem está usando,
+  // pra não perder o que estiver sendo digitado no meio de um lançamento.
+  const [novaVersao,setNovaVersao]=useState(false);
+  useEffect(()=>{
+    window.__razaoNovaVersao=()=>setNovaVersao(true);
+    return ()=>{ delete window.__razaoNovaVersao; };
+  },[]);
   const [pickerYear,setPickerYear]=useState(view.getFullYear());
   const [scrolled,setScrolled]=useState(false);
   const [saveState,setSaveState]=useState("idle"); // idle|saving|saved|erro
@@ -2053,7 +2092,7 @@ function App(){
   if(loadStatus==="carregando") return <SkeletonScreen/>;
   if(loadStatus==="erro") return <LoadErrorScreen message={loadError} onRetry={()=>setLoadNonce(n=>n+1)} onSignOut={sb?signOut:null}/>;
 
-  const monthLabel=view.toLocaleDateString("pt-BR",{month:"long",year:"numeric"});
+  const monthLabel=capFirst(view.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}));
 
   return (
     <div className={"rz "+theme}>
@@ -2124,6 +2163,7 @@ function App(){
               <span className="navlbl2">
                 <b>{session?session.user.email.split("@")[0]:"Modo local"}</b>
                 <small>{session?"Conta conectada":"Somente neste aparelho"}</small>
+                <small className="ver">versão {APP_VERSION}</small>
               </span>
             </div>
           </nav>
@@ -2131,6 +2171,11 @@ function App(){
           <div className="tabcontent">
             {!sb && <div className="banner">Modo local: os dados ficam só neste aparelho. Configure o Supabase no início do arquivo para ter login e sincronização entre dispositivos.</div>}
             {offlineReadOnly && <div className="banner err">Sem conexão — mostrando a última versão salva. Alterações não serão gravadas até a conexão voltar.</div>}
+            {novaVersao &&
+              <div className="banner upd">
+                <span>Uma versão mais nova do Razão já foi baixada. Recarregue quando quiser para usá-la.</span>
+                <button className="sbtn" onClick={()=>window.location.reload()}><Icon name="brilho" size={14}/> Atualizar agora</button>
+              </div>}
             {tab==="geral" && <Geral {...{txs,accounts,holdings,view,onSelectMonth:selectMonth,monthIndex,update,patrimonyHistory,recaps,aiModel:settings?.aiModel||"rapido"}}/>}
             {tab==="balanco" && <Balanco {...{grouped,monthLabel,totals,prevTotals,sparkline,plannedTotal,alerts,byCatChart,acctName,txs,view,accounts,onSelectMonth:selectMonth,update,isDesktop,onEditMobile:openEditMobile,monthIndex,categoryMemory,hourlyWageCents:settings?.hourlyWageCents||0,budgetRows,aiModel:settings?.aiModel||"rapido"}}/>}
             {tab==="orcamento" && <Orcamento {...{budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts}}/>}
@@ -2163,6 +2208,7 @@ function App(){
         <button className="sheetlistitem" onClick={()=>{exportCSV();setMoreOpen(false);}}><Icon name="baixar" size={18}/> Exportar dados (.csv)</button>
         <button className="sheetlistitem" onClick={()=>{fileRef.current?.click();setMoreOpen(false);}}><Icon name="enviar" size={18}/> Importar backup</button>
         {sb && <button className="sheetlistitem danger" onClick={()=>{signOut();setMoreOpen(false);}}><Icon name="sair" size={18}/> Sair da conta</button>}
+        <div className="versionline">Razão versão {APP_VERSION} · {fmtDateBR(APP_BUILD)}</div>
       </Sheet>
 
       <Sheet open={settingsOpen} onClose={()=>setSettingsOpen(false)} title="Configurações">
@@ -2176,6 +2222,12 @@ function App(){
             <button key={k} className={(settings?.aiModel||"rapido")===k?"on in":""} onClick={()=>update(d=>({settings:{...d.settings,aiModel:k}}))}>{m.label}</button>)}
         </div>
         <div className="hint">{AI_MODELS[settings?.aiModel||"rapido"].hint} Se um documento vier bagunçado ou com muitas linhas erradas, troque para "Cuidadoso" e mande de novo só aquele arquivo.</div>
+        <div className="sheetdivider"/>
+        <div className="kv"><span className="kk">Versão do app</span><span className="vv">{APP_VERSION}</span></div>
+        <div className="kv"><span className="kk">Atualizado em</span><span className="vv">{fmtDateBR(APP_BUILD)}</span></div>
+        {novaVersao
+          ? <button className="sbtn primary" style={{marginTop:10}} onClick={()=>window.location.reload()}><Icon name="brilho" size={14}/> Instalar a versão nova</button>
+          : <div className="hint">Você está na versão mais recente que este aparelho baixou. Quando sair uma nova, um aviso aparece aqui e no topo da tela.</div>}
       </Sheet>
 
       <Sheet open={sheetOpen} onClose={()=>setSheetOpen(false)} title={sheetEditTx?"Editar lançamento":"Novo lançamento"} returnFocusRef={fabRef}>
@@ -2898,7 +2950,12 @@ ${AI_SUMMARY_STYLE}`;
         ? (Object.keys(displayGrouped).length===0 &&
             <EmptyState icon="filtro" title="Nenhum resultado" text="Nenhum lançamento corresponde à busca ou aos filtros aplicados." action={{label:"Ver no manual",onClick:()=>openHelp("busca-filtros")}}/>)
         : (Object.keys(grouped).length===0 &&
-            <EmptyState icon="documento" title={`Nenhum lançamento em ${monthLabel}`} text="Toque em adicionar para registrar seu primeiro lançamento do mês." action={{label:"Ver no manual",onClick:()=>openHelp("registrar-lancamentos")}}/>)}
+            <EmptyState icon="documento" title={`Nenhum lançamento em ${monthLabel}`}
+              text={isDesktop
+                ? "Preencha o formulário aqui em cima para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo."
+                : "Toque no botão + para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo."}
+              action={{label:"Importar extratos e faturas",icon:"brilho",onClick:()=>goToTab("extrato")}}
+              secondary={{label:"Ver no manual",onClick:()=>openHelp("registrar-lancamentos")}}/>)}
 
       {Object.entries(displayGrouped).map(([d,list])=>{
         const dayTotal=list.reduce((s,t)=>s+t.cents*TYPES[t.type].sign,0);
@@ -2911,7 +2968,7 @@ ${AI_SUMMARY_STYLE}`;
             {list.map(t=>{const cls=TYPES[t.type].cls,acc=acctName(t.acctId);
               const isTrf=t.type==="transferencia";
               const flowMk=txEffectiveMonth(t,accounts), shifted=t.type==="gasto"&&flowMk!==monthKey(t.date);
-              const flowLabel=shifted?new Date(flowMk+"-01T00:00:00").toLocaleDateString("pt-BR",{month:"short",year:"2-digit"}):null;
+              const flowLabel=shifted?shortMonthLabel(new Date(flowMk+"-01T00:00:00")):null;
               return(
               <TxRow key={t.id} t={t} cls={cls} acc={acc} isTrf={isTrf} shifted={shifted} flowLabel={flowLabel} acctName={acctName} hourlyWageCents={hourlyWageCents}
                 onEdit={()=>requestEdit(t)} onDelete={()=>requestDelete(t)} onMarkPaid={()=>markAsPaid(t)} onTagClick={(tg)=>toggleInArray("tags",tg)}/>);})}
@@ -3121,7 +3178,7 @@ function Geral({ txs, accounts, holdings, view, onSelectMonth, monthIndex, updat
   const patrimonyEvo=useMemo(()=>{
     return Object.entries(patrimonyHistory||{}).sort(([a],[b])=>a<b?-1:1).slice(-12).map(([mk,cents])=>{
       const d=new Date(mk+"-01T00:00:00");
-      return { name:d.toLocaleDateString("pt-BR",{month:"short",year:"2-digit"}).replace(".",""), bars:[{v:cents/100,color:cents>=0?"var(--pos)":"var(--neg)"}] };
+      return { name:shortMonthLabel(d), bars:[{v:cents/100,color:cents>=0?"var(--pos)":"var(--neg)"}] };
     });
   },[patrimonyHistory]);
 
@@ -3235,7 +3292,7 @@ function Geral({ txs, accounts, holdings, view, onSelectMonth, monthIndex, updat
       const d=new Date(fy,fm-1+i,1);
       const mk=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
       const b=monthBucket(mk);
-      arr.push({ name:d.toLocaleDateString("pt-BR",{month:"short",year:"2-digit"}).replace(".",""), bars:[{v:b.entradas/100,color:"var(--pos)"},{v:b.saidas/100,color:"var(--neg)"}], date:d });
+      arr.push({ name:shortMonthLabel(d), bars:[{v:b.entradas/100,color:"var(--pos)"},{v:b.saidas/100,color:"var(--neg)"}], date:d });
     }
     return { arr, truncated: total>EVO_CAP, total };
   },[monthIndex]);
@@ -3277,7 +3334,10 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
   }
 
   if(txs.length===0){
-    return <EmptyState icon="panorama" title="Nenhum lançamento registrado ainda" text="Adicione algo pelo botão de lançamento para ver o panorama geral." action={{label:"Ver no manual",onClick:()=>openHelp("registrar-lancamentos")}}/>;
+    return <EmptyState icon="panorama" title="Nenhum lançamento registrado ainda"
+      text="O jeito mais rápido de começar: baixe os PDFs do mês no site do seu banco e do seu cartão e mande todos aqui de uma vez — a IA lê, classifica e você só confere."
+      action={{label:"Importar extratos e faturas",icon:"brilho",onClick:()=>goToTab("extrato")}}
+      secondary={{label:"Ver no manual",onClick:()=>openHelp("registrar-lancamentos")}}/>;
   }
 
   return (
@@ -3330,17 +3390,25 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
             {a.kind==="cartao" && a.limit>0 &&
               <div style={{marginTop:8,marginLeft:48}}>
                 <ProgressBar spent={committed.net} limit={a.limit} status={committed.net>=a.limit?"over":committed.net/a.limit>=0.8?"warn":"ok"}/>
-                <div className="mm">{Math.min(100,committed.net/a.limit*100).toFixed(0)}% do limite comprometido · {brl(committed.net)} de {brl(a.limit)}{committed.credit>0?` · crédito de ${brl(committed.credit)}`:""}</div>
+                <div className="mm">{Math.min(100,committed.net/a.limit*100).toFixed(0)}% do limite comprometido · {brl(committed.net)} de {brl(a.limit)}{committed.credit>0?` · você pagou ${brl(committed.credit)} a mais, que fica como saldo no cartão`:""}</div>
               </div>}
           </div>);})}
       </div>
 
       <div className="card g-6">
         <h3>Independência Financeira</h3>
-        <div className="sub">Quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios.</div>
-        <div className="bal num" style={{fontSize:32,fontWeight:500,margin:"2px 0 4px",color:fi.pct>=100?"var(--pos)":"var(--text)"}}>{fi.pct.toFixed(1)}%</div>
-        <ProgressBar spent={Math.min(fi.pct,100)} limit={100} status={fi.pct>=100?"ok":fi.pct>=50?"warn":"none"}/>
-        <div className="mm">Meta: 100% · Proventos médios {brl(Math.round(fi.avgProv))}/mês · Gastos médios {brl(Math.round(fi.avgGasto))}/mês · calculado com base em {fi.monthsWithData} {fi.monthsWithData===1?"mês":"meses"}</div>
+        <div className="sub">Quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios. Proventos são o que a sua carteira paga sozinha: dividendos, juros, aluguéis.</div>
+        {fi.avgProv>0
+          ? <React.Fragment>
+              <div className="bal num" style={{fontSize:32,fontWeight:500,margin:"2px 0 4px",color:fi.pct>=100?"var(--pos)":"var(--text)"}}>{fi.pct.toFixed(1)}%</div>
+              <ProgressBar spent={Math.min(fi.pct,100)} limit={100} status={fi.pct>=100?"ok":fi.pct>=50?"warn":"none"}/>
+              <div className="mm">Meta: 100% · Proventos médios {brl(Math.round(fi.avgProv))}/mês · Gastos médios {brl(Math.round(fi.avgGasto))}/mês · calculado com base em {fi.monthsWithData} {fi.monthsWithData===1?"mês":"meses"}</div>
+            </React.Fragment>
+          : <p className="hint" style={{marginTop:0}}>
+              Ainda não há proventos registrados, então este indicador fica em espera — não é um problema, é só o começo.
+              Assim que você lançar um ganho na categoria "Proventos", ele passa a mostrar que parte dos seus gastos
+              {fi.avgGasto>0?` (hoje ${brl(Math.round(fi.avgGasto))}/mês)`:""} a sua carteira já sustentaria sozinha.
+            </p>}
       </div>
 
       <div className="card g-6">
@@ -3386,7 +3454,7 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
 
       <div className="card g-6">
         <h3>Assinaturas e recorrências <button className="sbtn" onClick={analyzePatterns} disabled={patternsBusy}><Icon name="brilho" size={14}/>{patternsBusy?"Analisando…":"Analisar com IA"}</button></h3>
-        <div className="sub">Detecta gastos recorrentes que sumiram ou vieram com valor fora do padrão.</div>
+        <div className="sub">Encontra cobranças mensais que sumiram do seu extrato (assinatura esquecida ou já cancelada) e valores que fugiram do padrão de sempre.</div>
         {patternsBusy &&
           <div className="aithink">
             <div className="aiorb"><i/><i/><i/><span className="core"/></div>
@@ -3398,7 +3466,7 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
           </div>}
         {patternsResult && <RichAI text={patternsResult}/>}
         {patternsError && <p className="hint" style={{color:"var(--neg)"}}>{patternsError}</p>}
-        {!patternsResult && !patternsBusy && !patternsError && <p className="hint">Peça pra IA revisar suas assinaturas e gastos recorrentes em busca de esquecimentos ou cobranças fora do padrão.</p>}
+        {!patternsResult && !patternsBusy && !patternsError && <p className="hint">A varredura é local e instantânea; a IA entra só para explicar o que encontrou e sugerir o que fazer.</p>}
       </div>
 
       {evoAll.arr.length>0 &&
@@ -3490,7 +3558,7 @@ function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal
         if(t.type==="ganho") ganho+=t.cents; else if(t.type==="gasto") gasto+=t.cents;
       });
       const pct = ganho>0 ? gasto/ganho*100 : (gasto>0?100:0);
-      return { mk, label:d.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}), ganho, gasto, pct, status: ganho===0?"none":pct>=100?"over":pct>=80?"warn":"ok" };
+      return { mk, label:capFirst(d.toLocaleDateString("pt-BR",{month:"long",year:"numeric"})), ganho, gasto, pct, status: ganho===0?"none":pct>=100?"over":pct>=80?"warn":"ok" };
     });
   },[txs,accounts]);
 
@@ -3543,7 +3611,7 @@ function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal
       <div className="card g-6">
         <h3>Orçamento de {monthLabel} <span className="num" style={{fontSize:14,fontWeight:500,color:totalSpent>plannedTotal&&plannedTotal>0?"var(--neg)":"var(--text)"}}>{brl(totalSpent)} / {brl(plannedTotal)}</span> <HelpIcon section="orcamento-ajuda"/></h3>
         <div className="sub">Defina quanto quer gastar em cada categoria. O histórico ajuda a ser realista. Gastos no cartão contam no mês da fatura, não no mês da compra.</div>
-        {budgetRows.length===0 && <p className="hint">Nenhuma categoria com orçamento ou gasto ainda. Adicione um orçamento ao lado.</p>}
+        {budgetRows.length===0 && <p className="hint">Nenhuma categoria com orçamento ou gasto ainda. Use o cartão "Definir orçamento" para escolher uma categoria e um limite — o histórico de quanto você costuma gastar aparece aqui assim que houver lançamentos.</p>}
         {budgetRows.map(r=>{
           const rollover=r.limit>0?r.limit-(prevSpentByCat[r.cat]||0):0;
           return(
@@ -3595,7 +3663,7 @@ function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal
         {commitment.map(c=>(
           <div key={c.mk} style={{marginTop:14}}>
             <div className="bh">
-              <span className="bname" style={{textTransform:"capitalize"}}>{c.label}
+              <span className="bname">{c.label}
                 {c.status==="over" && <span className="tag over">comprometido</span>}
                 {c.status==="warn" && <span className="tag warn">atenção</span>}
                 {c.status==="ok" && <span className="tag ok">tranquilo</span>}
@@ -3611,7 +3679,9 @@ function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal
 
       <div className="card g-12">
         <h3>Simulador "e se"</h3>
-        <div className="sub">Local, sem IA — usa a média real dos últimos {avgMonthly.months||0} meses como base e recalcula na hora.</div>
+        <div className="sub">Local, sem IA — {avgMonthly.months>0
+          ? `usa a média real dos seus últimos ${avgMonthly.months} ${avgMonthly.months===1?"mês":"meses"} como base e recalcula na hora.`
+          : "assim que houver pelo menos um mês fechado, simula aqui o efeito de cortar um gasto ou assumir um novo."}</div>
         {avgMonthly.months===0
           ? <p className="hint">Sem histórico suficiente ainda para simular.</p>
           : <React.Fragment>
@@ -3765,10 +3835,18 @@ function Investimentos({ holdings, update, monthIndex, monthLabel, txs, view, on
 
       <div className="card g-6">
         <h3>Independência Financeira</h3>
-        <div className="sub">Quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios.</div>
-        <div className="bal num" style={{fontSize:32,fontWeight:500,margin:"2px 0 4px",color:fi.pct>=100?"var(--pos)":"var(--text)"}}>{fi.pct.toFixed(1)}%</div>
-        <ProgressBar spent={Math.min(fi.pct,100)} limit={100} status={fi.pct>=100?"ok":fi.pct>=50?"warn":"none"}/>
-        <div className="mm">Meta: 100% · Proventos médios {brl(Math.round(fi.avgProv))}/mês · Gastos médios {brl(Math.round(fi.avgGasto))}/mês · calculado com base em {fi.monthsWithData} {fi.monthsWithData===1?"mês":"meses"}</div>
+        <div className="sub">Quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios. Proventos são o que a sua carteira paga sozinha: dividendos, juros, aluguéis.</div>
+        {fi.avgProv>0
+          ? <React.Fragment>
+              <div className="bal num" style={{fontSize:32,fontWeight:500,margin:"2px 0 4px",color:fi.pct>=100?"var(--pos)":"var(--text)"}}>{fi.pct.toFixed(1)}%</div>
+              <ProgressBar spent={Math.min(fi.pct,100)} limit={100} status={fi.pct>=100?"ok":fi.pct>=50?"warn":"none"}/>
+              <div className="mm">Meta: 100% · Proventos médios {brl(Math.round(fi.avgProv))}/mês · Gastos médios {brl(Math.round(fi.avgGasto))}/mês · calculado com base em {fi.monthsWithData} {fi.monthsWithData===1?"mês":"meses"}</div>
+            </React.Fragment>
+          : <p className="hint" style={{marginTop:0}}>
+              Ainda não há proventos registrados, então este indicador fica em espera — não é um problema, é só o começo.
+              Assim que você lançar um ganho na categoria "Proventos", ele passa a mostrar que parte dos seus gastos
+              {fi.avgGasto>0?` (hoje ${brl(Math.round(fi.avgGasto))}/mês)`:""} a sua carteira já sustentaria sozinha.
+            </p>}
       </div>
 
       {byClass.length>0 &&
@@ -3970,7 +4048,7 @@ function Contas({ accounts, update, monthTx, txs }){
             <div className="adot" style={{background:a.color}}><Icon name={a.kind==="cartao"?"cartao":"banco"} size={16}/></div>
             <div style={{flex:1}}>
               <div className="aname">{a.name}</div>
-              <div className="akind">{a.kind==="cartao"?<>Cartão{a.closingDay?` · fecha dia ${a.closingDay}`:""}{a.dueDay?` · vence dia ${a.dueDay}`:""} · fatura do mês {inv.net===0&&inv.gasto>0?"quitada":brl(inv.net)}{inv.credit>0?` · crédito de ${brl(inv.credit)}`:""}</>:"Conta"}{a.openingBalance?<> · saldo inicial {brl(a.openingBalance)}{a.openingDate?` em ${fmtDateBR(a.openingDate)}`:""}</>:""}</div>
+              <div className="akind">{a.kind==="cartao"?<>Cartão{a.closingDay?` · fecha dia ${a.closingDay}`:""}{a.dueDay?` · vence dia ${a.dueDay}`:""} · fatura do mês {inv.net===0&&inv.gasto>0?"quitada":brl(inv.net)}{inv.credit>0?` · ${brl(inv.credit)} pagos a mais`:""}</>:"Conta"}{a.openingBalance?<> · saldo inicial {brl(a.openingBalance)}{a.openingDate?` em ${fmtDateBR(a.openingDate)}`:""}</>:""}</div>
             </div>
             {a.kind==="cartao" && <button className="sbtn iconsbtn" aria-label="Auditar fatura" onClick={()=>openAudit(a)}><Icon name="documento" size={14}/></button>}
             <button className="sbtn iconsbtn" aria-label="Editar" onClick={()=>setForm(a)}><Icon name="editar" size={14}/></button>
@@ -3979,7 +4057,7 @@ function Contas({ accounts, update, monthTx, txs }){
           {a.kind==="cartao" && a.limit>0 &&
             <div style={{marginTop:8,marginLeft:48}}>
               <ProgressBar spent={inv.net} limit={a.limit} status={inv.net>=a.limit?"over":inv.net/a.limit>=0.8?"warn":"ok"}/>
-              <div className="mm">{Math.min(100,inv.net/a.limit*100).toFixed(0)}% do limite comprometido · {brl(inv.net)} de {brl(a.limit)}{inv.credit>0?` · crédito de ${brl(inv.credit)}`:""}</div>
+              <div className="mm">{Math.min(100,inv.net/a.limit*100).toFixed(0)}% do limite comprometido · {brl(inv.net)} de {brl(a.limit)}{inv.credit>0?` · sobrou ${brl(inv.credit)} pago a mais`:""}</div>
             </div>}
         </div>);})}
     </div>
@@ -4005,7 +4083,7 @@ function Contas({ accounts, update, monthTx, txs }){
     <Sheet open={!!auditAccount} onClose={()=>setAuditAccount(null)} title={auditAccount?`Auditar fatura · ${auditAccount.name}`:""}>
       {auditAccount &&
         <React.Fragment>
-          <div className="sub" style={{marginBottom:8}}>Cole abaixo o texto da fatura (mesmo formato do Extrato Inteligente) e escolha o mês de referência.</div>
+          <div className="sub" style={{marginBottom:8}}>Cole abaixo o texto da fatura (mesmo formato aceito em "Importar do banco") e escolha o mês de referência.</div>
           <input className="fld" type="month" value={auditMonth} onChange={e=>{setAuditMonth(e.target.value);setAuditResult(null);}} style={{marginBottom:10}}/>
           <textarea className="fld" rows={6}
             style={{resize:"vertical",fontFamily:"'IBM Plex Mono',monospace",fontSize:13,marginBottom:10}}
@@ -4130,7 +4208,7 @@ function parseExtratoText(text){
   });
   return out;
 }
-/* ---------- EXTRATO INTELIGENTE (importação em lote de extratos e faturas) ----------
+/* ---------- IMPORTAR DO BANCO (importação em lote de extratos e faturas) ----------
    A ideia é chegar o mais perto possível de um "open finance manual": a pessoa joga TODOS os PDFs do mês
    (extratos das contas + faturas dos cartões) de uma vez, e o app cuida do resto — descobre de qual banco
    é cada documento, se é extrato ou fatura, casa com a conta cadastrada e classifica cada linha, separando
@@ -4346,12 +4424,25 @@ function Extrato({ accounts, update, txs, aiModel }){
   }
 
   const docsComItens=docs.filter(d=>items.some(it=>it.docId===d.id));
+  // a IA casa o documento com a conta pelo NOME do banco. Enquanto as contas tiverem os nomes
+  // genéricos que vêm de fábrica, esse casamento não tem como acontecer e a pessoa acaba
+  // escolhendo a conta na mão em todo documento — vale avisar antes de ela perder tempo.
+  const contasGenericas=accounts.filter(a=>/^(conta|cartão|cartao|conta principal|cartão de crédito|cartao de credito|carteira|banco)$/i.test((a.name||"").trim()));
 
   return (
     <React.Fragment>
     <div className="card">
-      <h3>Extrato Inteligente <HelpIcon section="extrato-ajuda"/></h3>
+      <h3>Importar do banco <HelpIcon section="extrato-ajuda"/></h3>
       <div className="sub">Jogue aqui todos os PDFs do mês — extratos das contas e faturas dos cartões, de uma vez. A IA descobre de qual banco é cada documento, se é extrato ou fatura, e separa gasto, entrada, investimento, pagamento de fatura e transferência entre os seus bancos. Nada entra no app antes de você revisar.</div>
+
+      {contasGenericas.length>0 &&
+        <div className="banner" style={{marginBottom:14,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{flex:1,minWidth:200}}>
+            Antes de importar, vale renomear {contasGenericas.length===1?"a conta":"as contas"} {contasGenericas.map(a=>`"${a.name}"`).join(", ")} com o nome do banco de verdade
+            (Nubank, Itaú, Inter, C6…). É por esse nome que a IA descobre sozinha a qual conta cada PDF pertence — com nome genérico, você teria que escolher em cada documento.
+          </span>
+          <button className="sbtn" onClick={()=>goToTab("contas")}><Icon name="banco" size={14}/> Renomear agora</button>
+        </div>}
 
       <div className={"dropzone"+(dragOver?" over":"")}
         onClick={()=>fileRef.current?.click()}
@@ -4673,7 +4764,7 @@ const HELP_SECTIONS=[
   {id:"orcamento-ajuda",n:5,title:"Orçamento",kw:"orçamento limite categoria mês histórico barra aviso estourou exceção"},
   {id:"metas-ajuda",n:6,title:"Metas",kw:"meta guardar dinheiro prazo objetivo poupança ligada categoria real"},
   {id:"investimentos-ajuda",n:7,title:"Investimentos",kw:"investimento ativo aporte provento carteira selic cdi ipca independência financeira"},
-  {id:"extrato-ajuda",n:8,title:"Extrato Inteligente",kw:"extrato pdf recibo foto importar colar texto duplicata auditoria fatura vários múltiplos bancos open finance lote arrastar progresso ia modelo transferência entre bancos pagamento de fatura"},
+  {id:"extrato-ajuda",n:8,title:"Importar do banco",kw:"extrato inteligente extrato pdf recibo foto importar colar texto duplicata auditoria fatura vários múltiplos bancos open finance lote arrastar progresso ia modelo transferência entre bancos pagamento de fatura"},
   {id:"assistente-ajuda",n:9,title:"Assistente",kw:"assistente perguntar pergunta ia inteligência artificial"},
   {id:"busca-filtros",n:10,title:"Busca e filtros",kw:"busca buscar filtro filtros chip categoria conta data valor status previsto realizado tag"},
   {id:"panorama-ajuda",n:11,title:"Panorama",kw:"panorama patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"},
@@ -4716,9 +4807,10 @@ let tourListener=null;
 function replayTour(){ tourListener && tourListener(); }
 const TOUR_STEPS=[
   { title:"Bem-vindo ao Razão", text:"Um jeito rápido de registrar e entender seu dinheiro, sem planilha. Vamos ver o essencial em poucos passos." },
-  { title:"Registre lançamentos", text:"Gastos, ganhos, investimentos e transferências — use o botão de adicionar (o + central no celular, ou o formulário no topo do Balanço no computador)." },
+  { title:"O caminho mais rápido: importar do banco", text:"Baixe os PDFs do mês no site do seu banco e do seu cartão e jogue todos de uma vez em \"Importar do banco\". A IA descobre de qual banco é cada arquivo, separa gasto, entrada, pagamento de fatura e transferência entre bancos — você só confere e importa." },
+  { title:"Ou registre na mão, quando preferir", text:"Gastos, ganhos, investimentos e transferências — use o botão de adicionar (o + central no celular, ou o formulário no topo do Balanço no computador)." },
   { title:"Acompanhe pelo Panorama e Balanço", text:"O Panorama mostra o histórico completo desde o início; o Balanço mostra mês a mês, com gráficos e orçamento." },
-  { title:"Cartão de crédito", text:"Um gasto no cartão conta na fatura do mês certo, não no mês da compra — configure fechamento e vencimento em Contas." },
+  { title:"Nomeie suas contas com o banco de verdade", text:"Em Contas, troque \"Conta principal\" pelo nome real (Nubank, Itaú, Inter). É por esse nome que a importação reconhece sozinha de quem é cada PDF. Aproveite e configure fechamento e vencimento dos cartões: assim um gasto no cartão conta na fatura do mês certo, não no mês da compra." },
   { title:"Precisa de ajuda?", text:"A aba Ajuda tem um manual completo com exemplos ao vivo, e o ícone \"?\" nos cartões principais leva direto pra seção certa." },
 ];
 function WelcomeTour(){
@@ -4932,7 +5024,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
           </HelpSection>}
 
         {visible("extrato-ajuda") &&
-          <HelpSection id="extrato-ajuda" n={8} title="Extrato Inteligente"
+          <HelpSection id="extrato-ajuda" n={8} title="Importar do banco"
             purpose="Fechar o mês inteiro de uma vez: joga todos os PDFs dos seus bancos e cartões, a IA lê, identifica e classifica tudo."
             steps={[
               "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extrato do banco A, extrato do banco B, fatura do cartão C. Pode misturar PDF e foto de recibo.",
@@ -5114,7 +5206,25 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
   // continua funcionando normalmente — isso é só uma melhoria de abertura offline, não requisito.
   if('serviceWorker' in navigator){
     window.addEventListener('load', function(){
-      navigator.serviceWorker.register('sw.js').catch(function(){});
+      navigator.serviceWorker.register('sw.js').then(function(reg){
+        if(!reg) return;
+        // uma versão nova já baixada e esperando: avisa quem está com o site aberto em vez de
+        // deixar a pessoa usando a versão antiga até fechar todas as abas
+        function vigiar(sw){
+          if(!sw) return;
+          sw.addEventListener('statechange', function(){
+            if(sw.state === 'installed' && navigator.serviceWorker.controller){
+              window.__razaoNovaVersao && window.__razaoNovaVersao();
+            }
+          });
+        }
+        if(reg.waiting && navigator.serviceWorker.controller) window.__razaoNovaVersao && window.__razaoNovaVersao();
+        reg.addEventListener('updatefound', function(){ vigiar(reg.installing); });
+        // procura atualização ao voltar para a aba, não só no carregamento
+        document.addEventListener('visibilitychange', function(){
+          if(document.visibilityState === 'visible') reg.update().catch(function(){});
+        });
+      }).catch(function(){});
     });
   }
 </script>
