@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Compilado em: 2026-07-24T23:34:15.625Z */
+   Compilado em: 2026-07-25T21:50:43.452Z */
 const {
   useState,
   useEffect,
@@ -92,144 +92,311 @@ async function callGemini({
   return data.text;
 }
 
-/* pede à IA para ler o PDF do extrato inteiro e devolver os lançamentos já estruturados e categorizados */
-async function analyzeStatementWithAI(file) {
-  const base64 = await fileToBase64(file);
-  const categoryList = Object.entries(CATS).map(([t, cats]) => `${t}: ${cats.map(c => c[0]).join(", ")}`).join("\n");
-  const prompt = `Você é um assistente financeiro que lê extratos bancários e faturas de cartão de crédito em PDF e extrai cada lançamento individual.
+/* modelos disponíveis no proxy /api/gemini. "rapido" é o padrão (cota grátis generosa);
+   "cuidadoso" usa o modelo maior, que erra menos em fatura/extrato com layout esquisito,
+   em troca de uma cota grátis bem menor e de alguns segundos a mais por documento. */
+const AI_MODELS = {
+  rapido: {
+    id: "gemini-2.5-flash",
+    label: "Rápido",
+    hint: "Gemini 2.5 Flash — cota grátis alta, alguns segundos por documento."
+  },
+  cuidadoso: {
+    id: "gemini-2.5-pro",
+    label: "Cuidadoso",
+    hint: "Gemini 2.5 Pro — lê com mais atenção faturas confusas; cota grátis menor e mais lento."
+  }
+};
+const aiModelId = key => (AI_MODELS[key] || AI_MODELS.rapido).id;
 
-Para cada lançamento, retorne:
-- date: data no formato ISO (AAAA-MM-DD). Se o ano não estiver explícito na linha, use o ano do período do extrato.
-- description: descrição curta e limpa (sem códigos internos do banco).
-- amount: valor em reais, número positivo (ex: 150.5).
-- type: "gasto" para saídas/débitos/compras, "ganho" para entradas/depósitos/créditos, "investimento" somente para aportes/aplicações claramente de investimento.
-- category: a categoria que melhor descreve o lançamento, escolhida EXATAMENTE entre as opções abaixo para o "type" escolhido:
+/* naturezas que a IA pode atribuir a uma linha do documento. Ficam separadas do "type" do app porque
+   pagamento de fatura e transferência entre bancos viram o MESMO type ("transferencia") no final, só que
+   com contas de origem/destino diferentes — a distinção importa para montar o par certo. */
+const AI_NATUREZAS = ["gasto", "ganho", "investimento", "pagamento_fatura", "transferencia_saida", "transferencia_entrada", "estorno", "ignorar"];
+
+/* descreve as contas cadastradas para a IA: é o que permite casar o documento com o banco certo
+   ("fatura do Nubank" → o cartão Nubank) e apontar a contraparte de transferências e pagamentos. */
+function accountsForPrompt(accounts) {
+  return accounts.map(a => {
+    const o = {
+      id: a.id,
+      nome: a.name,
+      tipo: a.kind === "cartao" ? "cartão de crédito" : "conta bancária"
+    };
+    if (a.kind === "cartao" && a.closingDay) o.diaFechamento = a.closingDay;
+    if (a.kind === "cartao" && a.dueDay) o.diaVencimento = a.dueDay;
+    return o;
+  });
+}
+
+/* Lê um documento inteiro (extrato em PDF, fatura de cartão em PDF ou foto de recibo) e devolve
+   {documento, lancamentos} já classificados. É o coração do "open finance manual": a IA primeiro decide
+   QUE documento é aquele e de QUAL conta cadastrada ele é, depois classifica linha por linha. */
+async function analyzeDocumentWithAI({
+  base64,
+  mimeType,
+  fileName,
+  accounts,
+  model
+}) {
+  const categoryList = Object.entries(CATS).map(([t, cats]) => `- ${t}: ${cats.map(c => c[0]).join(", ")}`).join("\n");
+  const prompt = `Você é um analista financeiro brasileiro, meticuloso, que lê documentos bancários em PDF ou foto e transforma cada linha em um lançamento estruturado. Leia o documento INTEIRO com atenção — todas as páginas — antes de responder. Nome do arquivo: "${fileName || "documento"}". Data de hoje: ${todayISO()}.
+
+CONTAS JÁ CADASTRADAS PELO USUÁRIO (use exatamente estes ids):
+${JSON.stringify(accountsForPrompt(accounts), null, 1)}
+
+PASSO 1 — Identifique o documento (campo "documento"):
+- tipo:
+  · "extrato" = movimentação de uma CONTA bancária (saldo, PIX, TED, débitos, créditos, salário).
+  · "fatura" = fatura de CARTÃO DE CRÉDITO (compras do período, parcelas, "total desta fatura", vencimento, limite).
+  · "recibo" = cupom fiscal, nota ou comprovante de uma compra única.
+  · "outro" = qualquer outra coisa.
+  Sinais de fatura: existe "vencimento", "total desta fatura", "limite", "compras parceladas", "pagamento recebido". Sinais de extrato: existe "saldo anterior"/"saldo do dia"/"saldo final" e a coluna de saldo acumulado.
+- banco: nome da instituição (ex: Nubank, Itaú, Bradesco, Inter, C6 Bank, BTG, Caixa, Banco do Brasil, Santander, Mercado Pago, PicPay, XP).
+- contaId: o id da conta cadastrada que ESTE documento representa. Regras rígidas:
+  · documento "fatura" só pode casar com uma conta de tipo "cartão de crédito";
+  · documento "extrato" só pode casar com uma conta de tipo "conta bancária";
+  · case pelo nome do banco/apelido; se nenhuma conta cadastrada servir, devolva "" (string vazia) — não invente id.
+- periodoInicio / periodoFim: primeiro e último dia cobertos pelo documento, em AAAA-MM-DD.
+- vencimento: só para fatura, a data de vencimento em AAAA-MM-DD (senão "").
+- totalDocumento: para fatura, o "total desta fatura" em reais; para extrato, 0.
+- confianca: 0 a 1, o quanto você tem certeza dessa identificação.
+- observacao: uma frase curta em português explicando como você identificou o documento e a conta.
+
+PASSO 2 — Extraia TODOS os lançamentos individuais, na ordem em que aparecem, sem pular nenhum e sem inventar nenhum. Para cada um:
+- data: AAAA-MM-DD. Se a linha só tiver dia/mês, complete com o ano do período do documento (cuidado com a virada de ano em dezembro/janeiro).
+- descricao: curta e limpa, sem códigos internos do banco, mas preservando o nome do estabelecimento ou da pessoa.
+- valor: número POSITIVO em reais (ex: 150.5). O sinal nunca vai aqui — quem diz se entra ou sai é a "natureza".
+- natureza, escolhida com muito critério:
+  · "gasto" — despesa de verdade: compra, débito, tarifa, juros, IOF, anuidade, boleto pago, saque. Em uma FATURA, toda compra do período é "gasto".
+  · "ganho" — entrada de verdade: salário, PIX/TED recebido de terceiros, rendimento, cashback creditado, restituição.
+  · "investimento" — aplicação/aporte (CDB, tesouro, fundo, previdência, compra de ações, resgate NÃO conta aqui).
+  · "pagamento_fatura" — pagamento da fatura do cartão de crédito. Em um EXTRATO aparece como "PAGAMENTO CARTAO", "PAGTO FATURA", "DEB AUT CARTAO", "PAGAMENTO DE FATURA". Em uma FATURA aparece como "PAGAMENTO RECEBIDO", "PAGAMENTO EFETUADO", "PGTO DEBITO AUTOMATICO" (normalmente na primeira linha, com sinal de crédito). ISSO NÃO É GASTO: é dinheiro saindo da conta e quitando o cartão. Nunca classifique como gasto.
+  · "transferencia_saida" — dinheiro saindo desta conta para OUTRA CONTA DO PRÓPRIO USUÁRIO (transferência entre bancos, PIX para si mesmo, aplicação em conta do mesmo titular em outro banco, "transferência entre contas"). Só use quando a descrição indicar mesmo titular / conta própria / outro banco do usuário. PIX para terceiros é "gasto".
+  · "transferencia_entrada" — o mesmo, mas entrando nesta conta vinda de outra conta do próprio usuário.
+  · "estorno" — estorno, devolução, cancelamento de compra, crédito de ajuste.
+  · "ignorar" — tudo que NÃO é um lançamento: saldo anterior, saldo do dia, saldo final, saldo disponível, limite, total da fatura, subtotais, totais por categoria, cabeçalho, rodapé, número de página, avisos, propaganda, "saldo em conta", "rendimento do dia" quando é só informativo do saldo.
+- categoria: escolha EXATAMENTE uma das opções abaixo, compatível com a natureza (para "gasto" use a lista de gasto; "ganho" e "estorno" usam a lista de ganho; "investimento" usa a lista de investimento; para pagamento_fatura e transferências use "").
 ${categoryList}
+- contraparteId: quando a natureza for "pagamento_fatura" ou uma transferência, o id da OUTRA conta cadastrada envolvida (ex: num extrato, o pagamento da fatura do cartão Nubank aponta para o id do cartão Nubank). Se não der para identificar, "".
+- parcelaAtual / parcelaTotal: se a linha indicar parcelamento ("03/10", "PARC 3 DE 10"), preencha os dois números; senão 0.
+- confianca: 0 a 1.
 
-Ignore linhas que não são lançamentos individuais (cabeçalhos, saldo anterior, saldo final, totais, rodapés, número de página).
-Retorne todos os lançamentos encontrados no documento, na ordem em que aparecem.`;
+REGRAS FINAIS:
+- Nunca some linhas nem crie um lançamento "total".
+- Em uma fatura, a soma dos "gasto" deve bater aproximadamente com o total da fatura menos os pagamentos e estornos.
+- Se o documento for um recibo, devolva um único lançamento de natureza "gasto".
+- Se não conseguir ler nada, devolva a lista vazia em vez de inventar.`;
   const schema = {
     type: "OBJECT",
     properties: {
-      transactions: {
+      documento: {
+        type: "OBJECT",
+        properties: {
+          tipo: {
+            type: "STRING",
+            enum: ["extrato", "fatura", "recibo", "outro"]
+          },
+          banco: {
+            type: "STRING"
+          },
+          contaId: {
+            type: "STRING"
+          },
+          periodoInicio: {
+            type: "STRING"
+          },
+          periodoFim: {
+            type: "STRING"
+          },
+          vencimento: {
+            type: "STRING"
+          },
+          totalDocumento: {
+            type: "NUMBER"
+          },
+          confianca: {
+            type: "NUMBER"
+          },
+          observacao: {
+            type: "STRING"
+          }
+        },
+        required: ["tipo", "banco", "contaId", "confianca"]
+      },
+      lancamentos: {
         type: "ARRAY",
         items: {
           type: "OBJECT",
           properties: {
-            date: {
+            data: {
               type: "STRING"
             },
-            description: {
+            descricao: {
               type: "STRING"
             },
-            amount: {
+            valor: {
               type: "NUMBER"
             },
-            type: {
+            natureza: {
               type: "STRING",
-              enum: ["gasto", "ganho", "investimento"]
+              enum: AI_NATUREZAS
             },
-            category: {
+            categoria: {
               type: "STRING"
+            },
+            contraparteId: {
+              type: "STRING"
+            },
+            parcelaAtual: {
+              type: "NUMBER"
+            },
+            parcelaTotal: {
+              type: "NUMBER"
+            },
+            confianca: {
+              type: "NUMBER"
             }
           },
-          required: ["date", "description", "amount", "type", "category"]
+          required: ["data", "descricao", "valor", "natureza"]
         }
       }
     },
-    required: ["transactions"]
+    required: ["documento", "lancamentos"]
   };
   const text = await callGemini({
     prompt,
     inlineData: {
-      mimeType: file.type || "application/pdf",
+      mimeType: mimeType || "application/pdf",
       data: base64
     },
-    schema
+    schema,
+    model
   });
   const parsed = JSON.parse(text);
-  return Array.isArray(parsed.transactions) ? parsed.transactions : [];
-}
-
-/* pede à IA para ler a foto de um recibo/nota fiscal e devolver um único lançamento estruturado */
-async function analyzeReceiptWithAI(file) {
-  const base64 = await fileToBase64(file);
-  const categoryList = CATS.gasto.map(c => c[0]).join(", ");
-  const prompt = `Você é um assistente financeiro que lê fotos de recibos e notas fiscais e extrai o lançamento de despesa.
-
-Retorne um único objeto com:
-- date: data da compra no formato ISO (AAAA-MM-DD). Se não houver data visível, use a data de hoje (${todayISO()}).
-- description: nome do estabelecimento ou do item principal, curto e limpo.
-- amount: valor TOTAL pago, número positivo (ex: 89.9).
-- category: a categoria que melhor descreve a compra, escolhida EXATAMENTE entre: ${categoryList}`;
-  const schema = {
-    type: "OBJECT",
-    properties: {
-      date: {
-        type: "STRING"
-      },
-      description: {
-        type: "STRING"
-      },
-      amount: {
-        type: "NUMBER"
-      },
-      category: {
-        type: "STRING"
-      }
-    },
-    required: ["date", "description", "amount", "category"]
+  return {
+    documento: parsed.documento || {},
+    lancamentos: Array.isArray(parsed.lancamentos) ? parsed.lancamentos : []
   };
-  const text = await callGemini({
-    prompt,
-    inlineData: {
-      mimeType: file.type || "image/jpeg",
-      data: base64
-    },
-    schema
-  });
-  return JSON.parse(text);
 }
 
-/* valida e converte os lançamentos vindos da IA para o formato usado pela lista de revisão do Extrato Inteligente */
-function sanitizeAiTransactions(list, accounts) {
-  const defAcct = accounts[0]?.id || "";
-  return list.map(t => {
-    const type = ["gasto", "ganho", "investimento"].includes(t.type) ? t.type : "gasto";
-    const validCats = CATS[type].map(c => c[0]);
-    const match = validCats.find(c => c.toLowerCase() === String(t.category || "").trim().toLowerCase());
-    const category = match || validCats[validCats.length - 1];
-    const cents = Math.max(0, Math.round((Number(t.amount) || 0) * 100));
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(t.date || "") ? t.date : todayISO();
-    return {
+/* escolhe a conta que o documento representa: a que a IA apontou, se ela existir e for do tipo coerente
+   (fatura↔cartão, extrato↔conta); senão a primeira conta cadastrada do tipo certo; senão "" (o usuário escolhe). */
+function resolveDocAccount(documento, accounts) {
+  const wanted = documento.tipo === "fatura" ? "cartao" : documento.tipo === "extrato" ? "conta" : null;
+  const guessed = accounts.find(a => a.id === documento.contaId);
+  if (guessed && (!wanted || guessed.kind === wanted)) return {
+    id: guessed.id,
+    auto: true
+  };
+  const fallback = wanted ? accounts.find(a => a.kind === wanted) : accounts[0];
+  return {
+    id: fallback ? fallback.id : "",
+    auto: false
+  };
+}
+
+/* converte a resposta da IA para as linhas da tela de revisão.
+   Aqui é onde "pagamento de fatura" e "transferência entre bancos" viram um lançamento de transferência
+   com origem e destino — o resto do app já sabe lidar com esse par (não entra em Entradas/Saídas, só move saldo). */
+function mapAiDocument({
+  documento,
+  lancamentos
+}, accounts, docId) {
+  const docAcct = resolveDocAccount(documento || {}, accounts);
+  const isCard = accounts.find(a => a.id === docAcct.id)?.kind === "cartao";
+  const rows = [];
+  (lancamentos || []).forEach(l => {
+    const natureza = AI_NATUREZAS.includes(l.natureza) ? l.natureza : "gasto";
+    if (natureza === "ignorar") return;
+    const cents = Math.max(0, Math.round((Number(l.valor) || 0) * 100));
+    if (cents <= 0) return;
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(l.data || "") ? l.data : todayISO();
+    const counterpart = accounts.find(a => a.id === l.contraparteId)?.id || "";
+    let desc = String(l.descricao || "").trim();
+    const pAt = Math.round(Number(l.parcelaAtual) || 0),
+      pTot = Math.round(Number(l.parcelaTotal) || 0);
+    if (pAt > 0 && pTot > 1 && !/\d\s*\/\s*\d/.test(desc)) desc += ` (${pAt}/${pTot})`;
+    let type,
+      category = "",
+      acctId = docAcct.id,
+      toAcctId = "";
+    if (natureza === "pagamento_fatura") {
+      type = "transferencia";
+      // no extrato da conta, o dinheiro sai da conta e entra no cartão; na fatura, é o contrário
+      if (isCard) {
+        toAcctId = docAcct.id;
+        acctId = counterpart || accounts.find(a => a.kind === "conta")?.id || "";
+      } else {
+        acctId = docAcct.id;
+        toAcctId = counterpart || (accounts.filter(a => a.kind === "cartao").length === 1 ? accounts.find(a => a.kind === "cartao").id : "");
+      }
+      if (!desc) desc = "Pagamento de fatura";
+    } else if (natureza === "transferencia_saida" || natureza === "transferencia_entrada") {
+      type = "transferencia";
+      if (natureza === "transferencia_saida") {
+        acctId = docAcct.id;
+        toAcctId = counterpart;
+      } else {
+        acctId = counterpart;
+        toAcctId = docAcct.id;
+      }
+      if (!desc) desc = "Transferência entre contas";
+    } else {
+      type = natureza === "estorno" ? "ganho" : natureza;
+      const validCats = CATS[type].map(c => c[0]);
+      const wanted = String(l.categoria || "").trim().toLowerCase();
+      const match = validCats.find(c => c.toLowerCase() === wanted);
+      category = natureza === "estorno" ? match || "Reembolso" : match || validCats[validCats.length - 1];
+      acctId = docAcct.id;
+    }
+    rows.push({
       id: uid(),
+      docId,
       date,
-      desc: String(t.description || "").trim(),
+      desc,
       cents,
       type,
       category,
-      acctId: defAcct
-    };
-  }).filter(it => it.cents > 0);
+      acctId,
+      toAcctId,
+      natureza,
+      confidence: typeof l.confianca === "number" ? l.confianca : null,
+      selected: true
+    });
+  });
+  const meta = {
+    tipo: ["extrato", "fatura", "recibo", "outro"].includes(documento?.tipo) ? documento.tipo : "outro",
+    banco: String(documento?.banco || "").trim(),
+    contaId: docAcct.id,
+    contaAuto: docAcct.auto,
+    periodoInicio: /^\d{4}-\d{2}-\d{2}$/.test(documento?.periodoInicio || "") ? documento.periodoInicio : "",
+    periodoFim: /^\d{4}-\d{2}-\d{2}$/.test(documento?.periodoFim || "") ? documento.periodoFim : "",
+    vencimento: /^\d{4}-\d{2}-\d{2}$/.test(documento?.vencimento || "") ? documento.vencimento : "",
+    totalDocumento: Math.max(0, Math.round((Number(documento?.totalDocumento) || 0) * 100)),
+    confianca: typeof documento?.confianca === "number" ? documento.confianca : null,
+    observacao: String(documento?.observacao || "").trim(),
+    fonte: "ia"
+  };
+  return {
+    meta,
+    rows
+  };
 }
 
-/* valida e converte o lançamento único vindo da IA (leitura de recibo) para o formato da lista de revisão */
-function sanitizeAiReceipt(t, accounts) {
-  const defAcct = accounts[0]?.id || "";
-  const validCats = CATS.gasto.map(c => c[0]);
-  const match = validCats.find(c => c.toLowerCase() === String(t.category || "").trim().toLowerCase());
-  const category = match || validCats[validCats.length - 1];
-  const cents = Math.max(0, Math.round((Number(t.amount) || 0) * 100));
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(t.date || "") ? t.date : todayISO();
-  return {
-    id: uid(),
-    date,
-    desc: String(t.description || "").trim(),
-    cents,
-    type: "gasto",
-    category,
-    acctId: defAcct
-  };
+/* leitura de fallback, sem IA: usa o pdf.js local + o parser por regex. Só reconhece gasto/ganho —
+   é a rede de segurança para quando o /api/gemini não está disponível (offline, cota estourada, deploy sem chave). */
+function localRowsFromText(text, docId, accounts) {
+  const def = accounts[0]?.id || "";
+  return parseExtratoText(text).map(it => ({
+    ...it,
+    docId,
+    acctId: def,
+    toAcctId: "",
+    natureza: it.type,
+    confidence: null,
+    selected: true
+  }));
 }
 
 /* memória de categorização: mapa descrição normalizada → categoria escolhida da última vez, alimentado a
@@ -1262,7 +1429,8 @@ const SEED = {
     monthly: {}
   },
   settings: {
-    hourlyWageCents: 0
+    hourlyWageCents: 0,
+    aiModel: "rapido"
   }
 };
 const SCHEMA_VERSION = 4;
@@ -1300,10 +1468,13 @@ function migrate(data) {
     ...g
   }));
   // 4.0 — preço em horas de trabalho (opcional): 0 = recurso desligado, não aparece em lugar nenhum
+  // 4.1 — escolha do motor de IA usada na leitura de documentos ("rapido" | "cuidadoso")
   d.settings = {
     hourlyWageCents: 0,
+    aiModel: "rapido",
     ...(d.settings || {})
   };
+  if (!AI_MODELS[d.settings.aiModel]) d.settings.aiModel = "rapido";
   d.schemaVersion = SCHEMA_VERSION;
   return d;
 }
@@ -3227,7 +3398,8 @@ function App() {
     monthIndex,
     update,
     patrimonyHistory,
-    recaps
+    recaps,
+    aiModel: settings?.aiModel || "rapido"
   }), tab === "balanco" && /*#__PURE__*/React.createElement(Balanco, {
     grouped,
     monthLabel,
@@ -3247,7 +3419,9 @@ function App() {
     onEditMobile: openEditMobile,
     monthIndex,
     categoryMemory,
-    hourlyWageCents: settings?.hourlyWageCents || 0
+    hourlyWageCents: settings?.hourlyWageCents || 0,
+    budgetRows,
+    aiModel: settings?.aiModel || "rapido"
   }), tab === "orcamento" && /*#__PURE__*/React.createElement(Orcamento, {
     budgetRows,
     budgets,
@@ -3274,7 +3448,8 @@ function App() {
   }), tab === "extrato" && /*#__PURE__*/React.createElement(Extrato, {
     accounts,
     update,
-    txs
+    txs,
+    aiModel: settings?.aiModel || "rapido"
   }), tab === "perguntar" && /*#__PURE__*/React.createElement(Perguntar, {
     txs,
     accounts
@@ -3405,7 +3580,30 @@ function App() {
     small: true
   }), /*#__PURE__*/React.createElement("div", {
     className: "hint"
-  }, "Preenchendo, os lançamentos passam a mostrar quantas horas de trabalho aquele valor representa. Deixe em R$ 0,00 para desligar.")), /*#__PURE__*/React.createElement(Sheet, {
+  }, "Preenchendo, os lançamentos passam a mostrar quantas horas de trabalho aquele valor representa. Deixe em R$ 0,00 para desligar."), /*#__PURE__*/React.createElement("div", {
+    className: "sheetdivider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 6
+    }
+  }, "Motor de IA usado para ler extratos e faturas"), /*#__PURE__*/React.createElement("div", {
+    className: "seg",
+    style: {
+      marginBottom: 6
+    }
+  }, Object.entries(AI_MODELS).map(([k, m]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    className: (settings?.aiModel || "rapido") === k ? "on in" : "",
+    onClick: () => update(d => ({
+      settings: {
+        ...d.settings,
+        aiModel: k
+      }
+    }))
+  }, m.label))), /*#__PURE__*/React.createElement("div", {
+    className: "hint"
+  }, AI_MODELS[settings?.aiModel || "rapido"].hint, " Se um documento vier bagunçado ou com muitas linhas erradas, troque para \"Cuidadoso\" e mande de novo só aquele arquivo.")), /*#__PURE__*/React.createElement(Sheet, {
     open: sheetOpen,
     onClose: () => setSheetOpen(false),
     title: sheetEditTx ? "Editar lançamento" : "Novo lançamento",
@@ -3828,6 +4026,248 @@ function TransactionForm({
 }
 
 /* ---------- BALANÇO ---------- */
+/* =======================================================================
+   BRIEFING PARA A IA — o resumo do mês só fica bom se a IA receber mais do
+   que quatro totais. Esta função monta o dossiê completo do mês (comparação
+   com o mês anterior e com a média recente, categorias com variação, maiores
+   gastos, cartões, orçamentos, recorrentes, previstos ainda não pagos) para
+   que o texto gerado possa citar fato, número e causa em vez de generalidade.
+   ======================================================================= */
+/* formatação leve do texto que a IA devolve: "## título", "- item" e **negrito**. Não é markdown
+   completo — é só o suficiente para o resumo elaborado ficar legível em vez de virar um bloco só. */
+function aiInline(text, kp) {
+  return String(text).split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map((part, i) => part.startsWith("**") && part.endsWith("**") ? /*#__PURE__*/React.createElement("b", {
+    key: kp + i
+  }, part.slice(2, -2)) : /*#__PURE__*/React.createElement(React.Fragment, {
+    key: kp + i
+  }, part));
+}
+function RichAI({
+  text
+}) {
+  const blocks = [];
+  String(text || "").split("\n").forEach(raw => {
+    const line = raw.trim();
+    if (!line) return;
+    if (/^#{1,4}\s/.test(line)) blocks.push({
+      k: "h",
+      t: line.replace(/^#{1,4}\s*/, "").replace(/\*\*/g, "")
+    });else if (/^[-*•]\s+/.test(line)) blocks.push({
+      k: "li",
+      t: line.replace(/^[-*•]\s+/, "")
+    });else if (/^\d+[.)]\s+/.test(line)) blocks.push({
+      k: "li",
+      t: line.replace(/^\d+[.)]\s*/, "")
+    });else blocks.push({
+      k: "p",
+      t: line
+    });
+  });
+  const out = [];
+  let bucket = null;
+  blocks.forEach(b => {
+    if (b.k === "li") {
+      if (!bucket) {
+        bucket = [];
+        out.push({
+          k: "ul",
+          items: bucket
+        });
+      }
+      bucket.push(b.t);
+    } else {
+      bucket = null;
+      out.push(b);
+    }
+  });
+  return /*#__PURE__*/React.createElement("div", {
+    className: "airich"
+  }, out.map((b, i) => b.k === "h" ? /*#__PURE__*/React.createElement("h4", {
+    key: i
+  }, b.t) : b.k === "ul" ? /*#__PURE__*/React.createElement("ul", {
+    key: i
+  }, b.items.map((t, j) => /*#__PURE__*/React.createElement("li", {
+    key: j
+  }, aiInline(t, i + "-" + j + "-")))) : /*#__PURE__*/React.createElement("p", {
+    key: i
+  }, aiInline(b.t, i + "-"))));
+}
+const toReal = c => Number((c / 100).toFixed(2));
+const pctDiff = (atual, anterior) => anterior > 0 ? Math.round((atual - anterior) / anterior * 100) : null;
+function buildMonthlyBriefing({
+  txs,
+  accounts,
+  monthDate,
+  monthIndex,
+  budgetRows
+}) {
+  const mkOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const mk = mkOf(monthDate);
+  const prevDate = new Date(monthDate.getFullYear(), monthDate.getMonth() - 1, 1);
+  const prevMk = mkOf(prevDate);
+  const nameOf = id => accounts.find(a => a.id === id)?.name || "—";
+  // mesmo critério do resto do app: gasto no cartão pesa no mês em que a fatura vence
+  const ofMonth = key => txs.filter(t => isRealized(t) && txEffectiveMonth(t, accounts) === key);
+  const cur = ofMonth(mk),
+    prv = ofMonth(prevMk);
+  const sumType = (arr, type) => arr.filter(t => t.type === type).reduce((s, t) => s + t.cents, 0);
+  const curIn = sumType(cur, "ganho"),
+    curOut = sumType(cur, "gasto"),
+    curInv = sumType(cur, "investimento");
+  const prvIn = sumType(prv, "ganho"),
+    prvOut = sumType(prv, "gasto"),
+    prvInv = sumType(prv, "investimento");
+  const catSum = arr => {
+    const m = {};
+    arr.filter(t => t.type === "gasto").forEach(t => {
+      m[t.category] = (m[t.category] || 0) + t.cents;
+    });
+    return m;
+  };
+  const curCat = catSum(cur),
+    prvCat = catSum(prv);
+  const categorias = Object.entries(curCat).sort((a, b) => b[1] - a[1]).map(([nome, c]) => ({
+    nome,
+    valor: toReal(c),
+    pctDoTotalDeGastos: curOut > 0 ? Math.round(c / curOut * 100) : 0,
+    mesAnterior: toReal(prvCat[nome] || 0),
+    variacaoPct: pctDiff(c, prvCat[nome] || 0)
+  }));
+  // categoria que existia no mês passado e sumiu agora também é informação útil
+  const categoriasQueSumiram = Object.entries(prvCat).filter(([nome]) => !curCat[nome]).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([nome, c]) => ({
+    nome,
+    valorNoMesAnterior: toReal(c)
+  }));
+  const maioresGastos = cur.filter(t => t.type === "gasto").sort((a, b) => b.cents - a.cents).slice(0, 8).map(t => ({
+    data: t.date,
+    descricao: (t.description || "").trim() || t.category,
+    categoria: t.category,
+    valor: toReal(t.cents),
+    conta: nameOf(t.acctId)
+  }));
+  const cartoes = accounts.filter(a => a.kind === "cartao").map(a => {
+    const inv = cardInvoiceNet(cur, a.id);
+    return {
+      nome: a.name,
+      gastosNaFatura: toReal(inv.gasto),
+      pagamentosRecebidos: toReal(inv.paid),
+      emAberto: toReal(inv.net),
+      limite: toReal(a.limit || 0),
+      pctDoLimiteUsado: a.limit > 0 ? Math.round(inv.net / a.limit * 100) : null
+    };
+  }).filter(c => c.gastosNaFatura > 0 || c.emAberto > 0 || c.pagamentosRecebidos > 0);
+  const contas = accounts.filter(a => a.kind === "conta").map(a => ({
+    nome: a.name,
+    entrou: toReal(cur.filter(t => t.type === "ganho" && t.acctId === a.id).reduce((s, t) => s + t.cents, 0)),
+    saiu: toReal(cur.filter(t => t.type === "gasto" && t.acctId === a.id).reduce((s, t) => s + t.cents, 0))
+  })).filter(c => c.entrou > 0 || c.saiu > 0);
+  const trf = cur.filter(t => t.type === "transferencia");
+  const transferencias = {
+    quantidade: trf.length,
+    volume: toReal(trf.reduce((s, t) => s + t.cents, 0)),
+    pagamentosDeFatura: trf.filter(t => accounts.find(a => a.id === t.toAcctId)?.kind === "cartao").map(t => ({
+      data: t.date,
+      valor: toReal(t.cents),
+      cartao: nameOf(t.toAcctId),
+      origem: nameOf(t.acctId)
+    }))
+  };
+  const previstos = txs.filter(t => !isRealized(t) && txEffectiveMonth(t, accounts) === mk);
+  const aindaNaoPagos = previstos.filter(t => t.type === "gasto").map(t => ({
+    data: t.date,
+    descricao: (t.description || "").trim() || t.category,
+    valor: toReal(t.cents)
+  })).sort((a, b) => a.data < b.data ? -1 : 1).slice(0, 8);
+  const orcamentos = (budgetRows || []).filter(r => r.limit > 0).map(r => ({
+    categoria: r.cat,
+    limite: toReal(r.limit),
+    gasto: toReal(r.spent),
+    pctUsado: Math.round(r.pct * 100),
+    situacao: r.status === "over" ? "estourado" : r.status === "warn" ? "perto do limite" : "dentro do limite"
+  }));
+
+  // média dos 3 meses anteriores, para dizer se o mês foi fora da curva ou só normal
+  const ultimos = [];
+  for (let i = 1; i <= 6; i++) {
+    const d = new Date(monthDate.getFullYear(), monthDate.getMonth() - i, 1);
+    const b = (monthIndex || {})[mkOf(d)];
+    if (b) ultimos.push({
+      mes: mkOf(d),
+      entradas: toReal(b.entradas),
+      saidas: toReal(b.saidas),
+      investido: toReal(b.investido)
+    });
+  }
+  const base = ultimos.slice(0, 3);
+  const mediaSaidas = base.length ? base.reduce((s, m) => s + m.saidas, 0) / base.length : 0;
+  const mediaEntradas = base.length ? base.reduce((s, m) => s + m.entradas, 0) / base.length : 0;
+  const diasNoMes = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+  const hojeNoMes = mkOf(new Date()) === mk;
+  const diasCorridos = hojeNoMes ? new Date().getDate() : diasNoMes;
+  const recorrentes = detectRecurringCandidates(txs, new Date()).slice(0, 6);
+  return {
+    mes: mk,
+    mesAnterior: prevMk,
+    mesEmAndamento: hojeNoMes,
+    diasCorridos,
+    diasNoMes,
+    totais: {
+      entradas: toReal(curIn),
+      saidas: toReal(curOut),
+      investido: toReal(curInv),
+      saldo: toReal(curIn - curOut - curInv),
+      taxaDePoupancaPct: curIn > 0 ? Math.round((curIn - curOut - curInv) / curIn * 100) : null,
+      gastoMedioPorDia: diasCorridos > 0 ? toReal(Math.round(curOut / diasCorridos)) : 0,
+      quantidadeDeLancamentos: cur.length
+    },
+    comparacaoMesAnterior: {
+      entradas: toReal(prvIn),
+      saidas: toReal(prvOut),
+      investido: toReal(prvInv),
+      variacaoEntradasPct: pctDiff(curIn, prvIn),
+      variacaoSaidasPct: pctDiff(curOut, prvOut),
+      variacaoInvestidoPct: pctDiff(curInv, prvInv)
+    },
+    mediaTresMesesAnteriores: {
+      entradas: Number(mediaEntradas.toFixed(2)),
+      saidas: Number(mediaSaidas.toFixed(2))
+    },
+    historicoRecente: ultimos,
+    categorias,
+    categoriasQueSumiram,
+    maioresGastos,
+    cartoes,
+    contas,
+    transferencias,
+    orcamentos,
+    aindaNaoPagos,
+    recorrentesSuspeitos: recorrentes
+  };
+}
+
+/* instruções de estilo compartilhadas por resumo do mês e recaps — é o que separa um parágrafo
+   genérico ("seus gastos aumentaram") de uma análise que cita a categoria, o valor e a causa. */
+const AI_SUMMARY_STYLE = `Escreva em português do Brasil, na segunda pessoa ("você"), tom direto de quem entende de finanças pessoais e fala como gente — sem jargão, sem motivacional, sem emoji.
+
+REGRAS:
+- Use SOMENTE os números do JSON. Nunca invente valor, categoria ou lançamento que não esteja lá.
+- Sempre que citar um número, dê o contexto: quanto foi, quanto era antes, quantos por cento mudou.
+- Prefira a causa concreta ("Lazer subiu 62% por causa dos R$ 380 do dia 12") ao efeito genérico ("os gastos aumentaram").
+- Se o mês ainda está em andamento (mesEmAndamento = true), fale em ritmo e projeção, não em fechamento.
+- Se faltar dado para alguma seção, diga isso em uma linha em vez de encher linguiça.
+- Valores em reais no formato R$ 1.234,56.
+
+FORMATO DA RESPOSTA (use exatamente estes títulos, com "## " na frente, e "- " nos itens):
+## O essencial
+Dois ou três períodos com o veredito do mês: sobrou ou faltou, e por quê.
+## Para onde foi o dinheiro
+3 a 5 itens com as maiores categorias, o quanto representam do total e o lançamento que puxou cada uma.
+## O que mudou
+3 a 4 itens comparando com o mês anterior e com a média dos últimos meses — só o que mudou de verdade (variação relevante), incluindo o que caiu.
+## Pontos de atenção
+2 a 4 itens: orçamento estourado, fatura de cartão alta em relação ao limite, conta prevista ainda não paga, assinatura suspeita, gasto fora da curva.
+## O que fazer agora
+Exatamente 3 ações concretas e específicas, cada uma com o número que a justifica.`;
 function Balanco({
   grouped,
   monthLabel,
@@ -3847,7 +4287,9 @@ function Balanco({
   onEditMobile,
   monthIndex,
   categoryMemory,
-  hourlyWageCents
+  hourlyWageCents,
+  budgetRows,
+  aiModel
 }) {
   // Fase 4: busca + filtros combináveis, unificando também os filtros por clique nos gráficos (categoria/tipo).
   // Passam a valer em todos os meses (não só o exibido) — exceto quando um intervalo de datas é definido.
@@ -3976,20 +4418,21 @@ function Balanco({
     setAiSummaryError("");
     setAiSummary("");
     try {
-      const catData = byCatChart.map(c => ({
-        categoria: c.name,
-        valor: (c.value / 100).toFixed(2)
-      }));
-      const prompt = `Dados financeiros do mês de ${monthLabel}:
-Entradas: R$ ${(totals.inc / 100).toFixed(2)}
-Saídas: R$ ${(totals.exp / 100).toFixed(2)}
-Investido: R$ ${(totals.inv / 100).toFixed(2)}
-Saldo: R$ ${(totals.saldo / 100).toFixed(2)}
-Gastos por categoria: ${JSON.stringify(catData)}
+      const briefing = buildMonthlyBriefing({
+        txs,
+        accounts,
+        monthDate: view,
+        monthIndex,
+        budgetRows
+      });
+      const prompt = `Você é o analista financeiro pessoal de quem usa este app. Abaixo está o dossiê COMPLETO do mês de ${monthLabel}, em JSON, já calculado a partir dos lançamentos reais (valores em reais).
 
-Escreva um resumo curto (2 a 3 frases, em português do Brasil, tom direto) destacando o principal ponto de atenção ou destaque positivo do mês. Não liste todos os números de novo, escolha o que for mais relevante.`;
+${JSON.stringify(briefing)}
+
+${AI_SUMMARY_STYLE}`;
       const text = await callGemini({
-        prompt
+        prompt,
+        model: aiModelId(aiModel)
       });
       setAiSummary(text.trim());
     } catch (err) {
@@ -4318,26 +4761,44 @@ Escreva um resumo curto (2 a 3 frases, em português do Brasil, tom direto) dest
     key: inlineEditTx ? inlineEditTx.id : "new"
   })), (displayTotals.inc > 0 || displayTotals.exp > 0 || displayTotals.inv > 0) && /*#__PURE__*/React.createElement("div", {
     className: "card g-6"
-  }, /*#__PURE__*/React.createElement("h3", null, "Resumo do mês ", /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("h3", null, "Análise do mês ", /*#__PURE__*/React.createElement("button", {
     className: "sbtn",
     onClick: generateSummary,
     disabled: aiSummaryBusy
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "brilho",
     size: 14
-  }), aiSummaryBusy ? "Gerando…" : "Gerar com IA")), aiSummary && /*#__PURE__*/React.createElement("p", {
+  }), aiSummaryBusy ? "Analisando…" : aiSummary ? "Refazer" : "Gerar com IA")), aiSummaryBusy && /*#__PURE__*/React.createElement("div", {
+    className: "aithink"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "aiorb"
+  }, /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("span", {
+    className: "core"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "aibody"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "aititle"
+  }, /*#__PURE__*/React.createElement("span", null, "Cruzando os números do mês", /*#__PURE__*/React.createElement("span", {
+    className: "aidots"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "aiphase"
+  }, "Comparando com o mês anterior, categorias, cartões, orçamentos e contas previstas."), /*#__PURE__*/React.createElement("div", {
+    className: "aibar"
+  }, /*#__PURE__*/React.createElement("i", {
     style: {
-      fontSize: 14,
-      lineHeight: 1.6
+      width: "100%",
+      opacity: .25
     }
-  }, aiSummary), aiSummaryError && /*#__PURE__*/React.createElement("p", {
+  }), /*#__PURE__*/React.createElement("span", null)))), aiSummary && /*#__PURE__*/React.createElement(RichAI, {
+    text: aiSummary
+  }), aiSummaryError && /*#__PURE__*/React.createElement("p", {
     className: "hint",
     style: {
       color: "var(--neg)"
     }
   }, aiSummaryError), !aiSummary && !aiSummaryBusy && !aiSummaryError && /*#__PURE__*/React.createElement("p", {
     className: "hint"
-  }, "Peça um resumo em linguagem natural do seu mês, gerado por IA a partir dos seus totais e categorias.")), plannedTotal > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Uma análise completa do mês: para onde o dinheiro foi, o que mudou em relação ao mês passado, o que merece atenção e três ações concretas — tudo calculado a partir dos seus lançamentos, cartões e orçamentos.")), plannedTotal > 0 && /*#__PURE__*/React.createElement("div", {
     className: "card g-6"
   }, /*#__PURE__*/React.createElement("h3", null, "Planejado × Realizado ", /*#__PURE__*/React.createElement("span", {
     className: "num",
@@ -5001,7 +5462,8 @@ function Geral({
   monthIndex,
   update,
   patrimonyHistory,
-  recaps
+  recaps,
+  aiModel
 }) {
   const EMPTY_BUCKET = {
     entradas: 0,
@@ -5128,7 +5590,45 @@ function Geral({
           const exp = weekTxs.filter(t => t.type === "gasto").reduce((s, t) => s + t.cents, 0);
           const inv = weekTxs.filter(t => t.type === "investimento").reduce((s, t) => s + t.cents, 0);
           try {
-            const prompt = `Dados financeiros da semana de ${fmtDateBR(lastWeekKey)} a ${fmtDateBR(lastWeekEnd)}:\nEntradas: R$ ${(inc / 100).toFixed(2)}\nSaídas: R$ ${(exp / 100).toFixed(2)}\nInvestido: R$ ${(inv / 100).toFixed(2)}\nSaldo: R$ ${((inc - exp - inv) / 100).toFixed(2)}\n\nEscreva um recap curto (2 a 3 frases, português do Brasil, tom direto) sobre essa semana financeira.`;
+            const porCat = {};
+            weekTxs.filter(t => t.type === "gasto").forEach(t => {
+              porCat[t.category] = (porCat[t.category] || 0) + t.cents;
+            });
+            const briefing = {
+              periodo: {
+                de: lastWeekKey,
+                ate: lastWeekEnd
+              },
+              totais: {
+                entradas: toReal(inc),
+                saidas: toReal(exp),
+                investido: toReal(inv),
+                saldo: toReal(inc - exp - inv),
+                lancamentos: weekTxs.length
+              },
+              gastoPorCategoria: Object.entries(porCat).sort((a, b) => b[1] - a[1]).map(([nome, c]) => ({
+                nome,
+                valor: toReal(c)
+              })),
+              maioresGastos: weekTxs.filter(t => t.type === "gasto").sort((a, b) => b.cents - a.cents).slice(0, 5).map(t => ({
+                data: t.date,
+                descricao: (t.description || "").trim() || t.category,
+                categoria: t.category,
+                valor: toReal(t.cents)
+              })),
+              semanaAnterior: (() => {
+                const ini = new Date(new Date(lastWeekKey + "T00:00:00").getTime() - 7 * 86400000).toISOString().slice(0, 10);
+                const fim = new Date(new Date(lastWeekKey + "T00:00:00").getTime() - 86400000).toISOString().slice(0, 10);
+                const ant = txs.filter(t => isRealized(t) && t.date >= ini && t.date <= fim);
+                return {
+                  de: ini,
+                  ate: fim,
+                  entradas: toReal(ant.filter(t => t.type === "ganho").reduce((s, t) => s + t.cents, 0)),
+                  saidas: toReal(ant.filter(t => t.type === "gasto").reduce((s, t) => s + t.cents, 0))
+                };
+              })()
+            };
+            const prompt = `Dossiê da semana financeira encerrada, em JSON (valores em reais):\n\n${JSON.stringify(briefing)}\n\nEscreva um recap da semana em português do Brasil, na segunda pessoa, tom direto e sem jargão. Use SÓ os números do JSON, sem inventar nada. Estrutura: um primeiro parágrafo de 2 a 3 períodos com o veredito da semana (sobrou ou faltou e por quê, comparando com a semana anterior), seguido de 2 a 3 linhas começando com "- " apontando o que puxou o gasto e o que merece atenção na semana que começa. Cite valores no formato R$ 1.234,56.`;
             const text = (await callGemini({
               prompt
             })).trim();
@@ -5160,11 +5660,13 @@ function Geral({
         const b = monthBucket(prevMonthKey);
         if (b.entradas > 0 || b.saidas > 0 || b.investido > 0) {
           try {
-            const catData = Object.entries(b.porCategoria).sort((a, b2) => b2[1] - a[1]).slice(0, 5).map(([n, c]) => ({
-              categoria: n,
-              valor: (c / 100).toFixed(2)
-            }));
-            const prompt = `Dados financeiros do mês ${prevMonthKey}:\nEntradas: R$ ${(b.entradas / 100).toFixed(2)}\nSaídas: R$ ${(b.saidas / 100).toFixed(2)}\nInvestido: R$ ${(b.investido / 100).toFixed(2)}\nSaldo: R$ ${((b.entradas - b.saidas - b.investido) / 100).toFixed(2)}\nMaiores categorias de gasto: ${JSON.stringify(catData)}\n\nEscreva um recap curto (2 a 3 frases, português do Brasil, tom direto) sobre esse mês financeiro, destacando o principal ponto de atenção ou destaque positivo.`;
+            const briefing = buildMonthlyBriefing({
+              txs,
+              accounts,
+              monthDate: prevMk,
+              monthIndex
+            });
+            const prompt = `Você é o analista financeiro pessoal de quem usa este app. O mês ${prevMonthKey} acabou de fechar. Dossiê completo em JSON (valores em reais):\n\n${JSON.stringify(briefing)}\n\n${AI_SUMMARY_STYLE}`;
             const text = (await callGemini({
               prompt
             })).trim();
@@ -5284,11 +5786,24 @@ function Geral({
         setPatternsResult("Nenhum padrão fora do comum encontrado — seus gastos recorrentes estão regulares.");
         return;
       }
-      const prompt = `Aqui estão padrões de gastos recorrentes detectados no histórico financeiro do usuário (JSON): ${JSON.stringify(candidates)}
+      const totalRecorrente = candidates.reduce((s, c) => s + Number(c.ultimoValor || 0), 0);
+      const prompt = `Padrões de gastos recorrentes detectados no histórico financeiro do usuário (JSON, valores em reais). "diasDesdeUltimaVez" alto sugere assinatura cancelada ou cobrança que sumiu; "variacaoPercentual" alto sugere reajuste ou cobrança fora do padrão. Soma dos últimos valores: R$ ${totalRecorrente.toFixed(2)}.
 
-Escreva um resumo curto e direto em português do Brasil (até 4 frases) destacando o que for mais relevante: assinaturas que pararam de aparecer há muito tempo (podem ter sido esquecidas ou já canceladas) e valores que subiram ou baixaram muito em relação ao normal. Seja direto e útil, sem listar todos os números de novo.`;
+${JSON.stringify(candidates)}
+
+Escreva uma análise em português do Brasil, na segunda pessoa, tom direto e sem jargão, usando SÓ estes números. Formato (use exatamente estes títulos, com "## " na frente, e "- " nos itens):
+## O que chama atenção
+Dois períodos com o veredito geral: quanto do seu mês está preso em cobranças recorrentes e se há algo claramente errado.
+## Possivelmente esquecidas
+Itens com muitos dias sem aparecer — para cada um, quantos dias, o valor que era cobrado e o que verificar. Se não houver, escreva "- Nenhuma cobrança sumiu do radar."
+## Reajustes e valores fora do padrão
+Itens que subiram ou caíram muito — cite o valor de agora, a média anterior e a variação percentual. Se não houver, escreva "- Nenhum valor fora do padrão."
+## O que fazer agora
+Exatamente 3 ações concretas, cada uma citando o nome do gasto e o número que a justifica.
+Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`;
       const text = await callGemini({
-        prompt
+        prompt,
+        model: aiModelId(aiModel)
       });
       setPatternsResult(text.trim());
     } catch (err) {
@@ -5376,22 +5891,16 @@ Escreva um resumo curto e direto em português do Brasil (até 4 frases) destaca
     style: {
       marginBottom: 4
     }
-  }, "Mês de ", latestMonthlyRecap.key), /*#__PURE__*/React.createElement("p", {
-    style: {
-      fontSize: 14,
-      lineHeight: 1.6
-    }
-  }, latestMonthlyRecap.text)), latestWeeklyRecap && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "Mês de ", latestMonthlyRecap.key), /*#__PURE__*/React.createElement(RichAI, {
+    text: latestMonthlyRecap.text
+  })), latestWeeklyRecap && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     className: "sub",
     style: {
       marginBottom: 4
     }
-  }, "Semana de ", fmtDateBR(latestWeeklyRecap.from), " a ", fmtDateBR(latestWeeklyRecap.to)), /*#__PURE__*/React.createElement("p", {
-    style: {
-      fontSize: 14,
-      lineHeight: 1.6
-    }
-  }, latestWeeklyRecap.text))), /*#__PURE__*/React.createElement("div", {
+  }, "Semana de ", fmtDateBR(latestWeeklyRecap.from), " a ", fmtDateBR(latestWeeklyRecap.to)), /*#__PURE__*/React.createElement(RichAI, {
+    text: latestWeeklyRecap.text
+  }))), /*#__PURE__*/React.createElement("div", {
     className: "card g-6"
   }, /*#__PURE__*/React.createElement("h3", null, "Saldo por conta ", /*#__PURE__*/React.createElement(HelpIcon, {
     section: "contas-cartoes"
@@ -5554,12 +6063,30 @@ Escreva um resumo curto e direto em português do Brasil (até 4 frases) destaca
     size: 14
   }), patternsBusy ? "Analisando…" : "Analisar com IA")), /*#__PURE__*/React.createElement("div", {
     className: "sub"
-  }, "Detecta gastos recorrentes que sumiram ou vieram com valor fora do padrão."), patternsResult && /*#__PURE__*/React.createElement("p", {
+  }, "Detecta gastos recorrentes que sumiram ou vieram com valor fora do padrão."), patternsBusy && /*#__PURE__*/React.createElement("div", {
+    className: "aithink"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "aiorb"
+  }, /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("span", {
+    className: "core"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "aibody"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "aititle"
+  }, /*#__PURE__*/React.createElement("span", null, "Procurando padrões nas suas recorrências", /*#__PURE__*/React.createElement("span", {
+    className: "aidots"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "aiphase"
+  }, "Cadência mensal, cobranças que sumiram e valores fora da média."), /*#__PURE__*/React.createElement("div", {
+    className: "aibar"
+  }, /*#__PURE__*/React.createElement("i", {
     style: {
-      fontSize: 14,
-      lineHeight: 1.6
+      width: "100%",
+      opacity: .25
     }
-  }, patternsResult), patternsError && /*#__PURE__*/React.createElement("p", {
+  }), /*#__PURE__*/React.createElement("span", null)))), patternsResult && /*#__PURE__*/React.createElement(RichAI, {
+    text: patternsResult
+  }), patternsError && /*#__PURE__*/React.createElement("p", {
     className: "hint",
     style: {
       color: "var(--neg)"
@@ -7386,333 +7913,918 @@ function parseExtratoText(text) {
   });
   return out;
 }
+/* ---------- EXTRATO INTELIGENTE (importação em lote de extratos e faturas) ----------
+   A ideia é chegar o mais perto possível de um "open finance manual": a pessoa joga TODOS os PDFs do mês
+   (extratos das contas + faturas dos cartões) de uma vez, e o app cuida do resto — descobre de qual banco
+   é cada documento, se é extrato ou fatura, casa com a conta cadastrada e classifica cada linha, separando
+   gasto, entrada, investimento, pagamento de fatura e transferência entre bancos. Nada é salvo sem revisão. */
+
+const DOC_PHASES = {
+  fila: {
+    label: "Na fila",
+    weight: 0
+  },
+  lendo: {
+    label: "Abrindo o arquivo",
+    weight: 0.06
+  },
+  ia: {
+    label: "IA lendo o documento",
+    weight: 0.15
+  },
+  conferindo: {
+    label: "Conferindo os lançamentos",
+    weight: 0.92
+  },
+  pronto: {
+    label: "Pronto",
+    weight: 1
+  },
+  erro: {
+    label: "Falhou",
+    weight: 1
+  }
+};
+const DOC_TIPO_LABEL = {
+  extrato: "Extrato",
+  fatura: "Fatura",
+  recibo: "Recibo",
+  outro: "Documento"
+};
+const MAX_DOC_BYTES = 3 * 1024 * 1024;
+const VALOR_COR = {
+  gasto: "var(--neg)",
+  ganho: "var(--pos)",
+  investimento: "var(--inv)",
+  transferencia: "var(--trf)"
+};
+const daysApart = (a, b) => Math.abs((new Date(a + "T00:00:00") - new Date(b + "T00:00:00")) / 86400000);
+const normDesc = s => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 function Extrato({
   accounts,
   update,
-  txs
+  txs,
+  aiModel
 }) {
+  const [docs, setDocs] = useState([]); // um por arquivo enviado, com status e progresso próprios
+  const [items, setItems] = useState([]); // lançamentos reconhecidos, cada um apontando para o docId de origem
+  const [running, setRunning] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [showText, setShowText] = useState(false);
   const [text, setText] = useState("");
-  const [items, setItems] = useState([]);
-  const [pdfBusy, setPdfBusy] = useState(false);
-  const [pdfError, setPdfError] = useState("");
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const [photoError, setPhotoError] = useState("");
-  const pdfRef = useRef(null);
-  const photoRef = useRef(null);
+  const fileRef = useRef(null);
+  const cameraRef = useRef(null);
+  const runningRef = useRef(false);
+  const queueRef = useRef([]); // fila real de processamento: aceita arquivos jogados enquanto outra leva roda
 
-  // conta padrão pré-selecionada para cada item reconhecido, assim "Aprovar" já fica liberado sem passo extra
-  function withDefaultAccount(arr) {
-    const def = accounts[0]?.id || "";
-    return arr.map(it => ({
-      ...it,
-      acctId: def
-    }));
-  }
-  function parse() {
-    setItems(withDefaultAccount(parseExtratoText(text)));
-  }
-  async function handlePhoto(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setPhotoError("");
-    setPhotoBusy(true);
+  const patchDoc = (id, patch) => setDocs(ds => ds.map(d => d.id === id ? {
+    ...d,
+    ...patch
+  } : d));
+
+  // avanço "de dentro" do documento enquanto a IA pensa: a barra caminha em direção ao fim da fase (88%)
+  // sem nunca alcançá-la, para não prometer conclusão antes da resposta chegar. Os saltos de verdade
+  // (arquivo aberto, resposta recebida, documento pronto) são os que movem o número para valer.
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => {
+      setDocs(ds => ds.map(d => d.status === "ia" ? {
+        ...d,
+        progress: Math.min(0.88, d.progress + (0.9 - d.progress) * 0.05)
+      } : d));
+    }, 400);
+    return () => clearInterval(t);
+  }, [running]);
+  const overall = useMemo(() => {
+    if (docs.length === 0) return 0;
+    return docs.reduce((s, d) => s + Math.min(1, d.progress), 0) / docs.length;
+  }, [docs]);
+  const doneCount = docs.filter(d => d.status === "pronto" || d.status === "erro").length;
+  const currentDoc = docs.find(d => d.status !== "pronto" && d.status !== "erro" && d.status !== "fila");
+  async function processOne(doc) {
+    patchDoc(doc.id, {
+      status: "lendo",
+      progress: DOC_PHASES.lendo.weight
+    });
+    let aiError = "";
     try {
-      const receipt = await analyzeReceiptWithAI(f);
-      const item = sanitizeAiReceipt(receipt, accounts);
-      setItems(prev => [item, ...prev]);
+      const base64 = await fileToBase64(doc.file);
+      patchDoc(doc.id, {
+        status: "ia",
+        progress: DOC_PHASES.ia.weight
+      });
+      const res = await analyzeDocumentWithAI({
+        base64,
+        mimeType: doc.file.type || "application/pdf",
+        fileName: doc.name,
+        accounts,
+        model: aiModelId(aiModel)
+      });
+      patchDoc(doc.id, {
+        status: "conferindo",
+        progress: DOC_PHASES.conferindo.weight
+      });
+      const {
+        meta,
+        rows
+      } = mapAiDocument(res, accounts, doc.id);
+      if (rows.length === 0) throw new Error("A IA não encontrou nenhum lançamento neste arquivo.");
+      setItems(prev => [...prev, ...rows]);
+      patchDoc(doc.id, {
+        status: "pronto",
+        progress: 1,
+        meta,
+        count: rows.length,
+        file: null
+      });
+      return;
     } catch (err) {
-      setPhotoError(err.message || "Não foi possível ler este recibo.");
-    } finally {
-      setPhotoBusy(false);
-      if (photoRef.current) photoRef.current.value = "";
+      aiError = err.message || "Falha ao analisar com IA.";
     }
-  }
-  async function readPdfLocally(f) {
-    await loadPdfJs();
-    const buf = await f.arrayBuffer();
-    const pdf = await window.pdfjsLib.getDocument({
-      data: buf
-    }).promise;
-    const extracted = await extractPdfText(pdf);
-    if (!extracted.trim()) throw new Error("Nenhum texto encontrado no PDF (pode ser uma imagem escaneada).");
-    setText(extracted);
-    setItems(withDefaultAccount(parseExtratoText(extracted)));
-  }
-  async function handlePdf(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setPdfError("");
-    setPdfBusy(true);
-    try {
+    // rede de segurança: sem IA disponível, ainda dá para extrair o texto do PDF localmente e usar o
+    // parser por regex (só reconhece gasto/ganho, sem identificar banco nem transferência)
+    if (/pdf/i.test(doc.file?.type || "") || /\.pdf$/i.test(doc.name)) {
       try {
-        const aiTx = await analyzeStatementWithAI(f);
-        if (aiTx.length === 0) throw new Error("A IA não encontrou lançamentos neste PDF.");
-        setItems(sanitizeAiTransactions(aiTx, accounts));
-        try {
-          // popula o texto bruto também, só como referência para conferência manual
-          await loadPdfJs();
-          const buf = await f.arrayBuffer();
-          const pdf = await window.pdfjsLib.getDocument({
-            data: buf
-          }).promise;
-          setText(await extractPdfText(pdf));
-        } catch (_) {}
+        patchDoc(doc.id, {
+          status: "conferindo",
+          progress: DOC_PHASES.conferindo.weight
+        });
+        await loadPdfJs();
+        const buf = await doc.file.arrayBuffer();
+        const pdf = await window.pdfjsLib.getDocument({
+          data: buf
+        }).promise;
+        const extracted = await extractPdfText(pdf);
+        const rows = localRowsFromText(extracted, doc.id, accounts);
+        if (rows.length === 0) throw new Error("Nenhuma linha reconhecida (o PDF pode ser uma imagem escaneada).");
+        setItems(prev => [...prev, ...rows]);
+        patchDoc(doc.id, {
+          status: "pronto",
+          progress: 1,
+          count: rows.length,
+          file: null,
+          aviso: `IA indisponível (${aiError}) — lido localmente, sem identificar banco nem transferências.`,
+          meta: {
+            tipo: "outro",
+            banco: "",
+            contaId: accounts[0]?.id || "",
+            contaAuto: false,
+            periodoInicio: "",
+            periodoFim: "",
+            vencimento: "",
+            totalDocumento: 0,
+            confianca: null,
+            observacao: "",
+            fonte: "local"
+          }
+        });
         return;
-      } catch (aiErr) {
-        console.error("IA indisponível, caindo para leitura local:", aiErr);
-        setPdfError(`IA indisponível (${aiErr.message}) — lendo localmente.`);
-        await readPdfLocally(f);
+      } catch (localErr) {
+        patchDoc(doc.id, {
+          status: "erro",
+          progress: 1,
+          error: `${aiError} ${localErr.message || ""}`.trim(),
+          file: null
+        });
         return;
       }
-    } catch (err) {
-      setPdfError(err.message || "Não foi possível ler este PDF.");
+    }
+    patchDoc(doc.id, {
+      status: "erro",
+      progress: 1,
+      error: aiError,
+      file: null
+    });
+  }
+  async function addFiles(fileList) {
+    const all = Array.from(fileList || []);
+    const accepted = all.filter(f => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name) || /^image\//.test(f.type));
+    if (accepted.length === 0) {
+      toast("Envie arquivos PDF ou imagens.", "error");
+      return;
+    }
+    if (accepted.length < all.length) toast(`${all.length - accepted.length} arquivo(s) ignorado(s): só PDF e imagem.`, "error");
+    // o arquivo trafega em base64 (≈ +33%) dentro de um JSON; acima disso a função serverless recusa o corpo
+    const grandes = accepted.filter(f => f.size > MAX_DOC_BYTES);
+    if (grandes.length) toast(`${grandes.length} arquivo(s) acima de 3 MB podem falhar na IA — separe em partes menores se der erro.`, "error");
+    const novos = accepted.map(f => ({
+      id: uid(),
+      name: f.name,
+      size: f.size,
+      file: f,
+      status: "fila",
+      progress: 0,
+      error: "",
+      aviso: "",
+      meta: null,
+      count: 0
+    }));
+    setDocs(ds => [...ds, ...novos]);
+    queueRef.current.push(...novos);
+    if (runningRef.current) return; // já tem uma leva rodando: ela vai consumir estes também
+    runningRef.current = true;
+    setRunning(true);
+    try {
+      // um de cada vez: evita estourar a cota gratuita da IA e mantém o progresso legível
+      while (queueRef.current.length) await processOne(queueRef.current.shift());
     } finally {
-      setPdfBusy(false);
-      if (pdfRef.current) pdfRef.current.value = "";
+      runningRef.current = false;
+      setRunning(false);
     }
   }
+  function onDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+  }
+  function analisarTexto() {
+    const rows = localRowsFromText(text, "manual", accounts);
+    if (rows.length === 0) {
+      toast("Nenhuma linha reconhecida no texto colado.", "error");
+      return;
+    }
+    const manualDoc = {
+      id: "manual",
+      name: "Texto colado",
+      size: 0,
+      file: null,
+      status: "pronto",
+      progress: 1,
+      error: "",
+      aviso: "",
+      count: rows.length,
+      meta: {
+        tipo: "outro",
+        banco: "",
+        contaId: accounts[0]?.id || "",
+        contaAuto: false,
+        periodoInicio: "",
+        periodoFim: "",
+        vencimento: "",
+        totalDocumento: 0,
+        confianca: null,
+        observacao: "",
+        fonte: "local"
+      }
+    };
+    setDocs(ds => ds.some(d => d.id === "manual") ? ds.map(d => d.id === "manual" ? manualDoc : d) : [...ds, manualDoc]);
+    setItems(prev => [...prev.filter(it => it.docId !== "manual"), ...rows]);
+  }
   function updateItem(id, patch) {
-    setItems(items.map(it => it.id === id ? {
+    setItems(its => its.map(it => it.id === id ? {
       ...it,
       ...patch
     } : it));
   }
   function removeItem(id) {
-    setItems(items.filter(it => it.id !== id));
+    setItems(its => its.filter(it => it.id !== id));
   }
-  // anti-duplicata: mesma data + mesmo valor + mesmo tipo + mesma descrição já existe no histórico. Não bloqueia
-  // (pode ser um gasto legítimo repetido), só avisa e deixa de fora do "Aprovar todos" por padrão — quem quiser
-  // importar mesmo assim aprova aquele item individualmente.
-  const dupIds = useMemo(() => {
+  function removeDoc(id) {
+    setItems(its => its.filter(it => it.docId !== id));
+    setDocs(ds => ds.filter(d => d.id !== id));
+  }
+  function limparTudo() {
+    setItems([]);
+    setDocs([]);
+    setText("");
+  }
+
+  // trocar a conta do documento reetiqueta todos os lançamentos dele de uma vez — inclusive o outro lado
+  // das transferências, quando era o documento que ocupava aquela ponta
+  function setDocAccount(docId, newAcct) {
+    const doc = docs.find(d => d.id === docId);
+    const old = doc?.meta?.contaId || "";
+    patchDoc(docId, {
+      meta: {
+        ...doc.meta,
+        contaId: newAcct,
+        contaAuto: false
+      }
+    });
+    setItems(its => its.map(it => it.docId !== docId ? it : {
+      ...it,
+      acctId: it.acctId === old || !it.acctId && it.type !== "transferencia" ? newAcct : it.acctId,
+      toAcctId: it.toAcctId === old ? newAcct : it.toAcctId
+    }));
+  }
+
+  // duplicata contra o histórico já salvo: mesma data, valor, tipo e descrição
+  const dupHistorico = useMemo(() => {
     const set = new Set();
     items.forEach(it => {
-      const dup = txs.some(t => t.date === it.date && t.cents === it.cents && t.type === it.type && (t.description || "").trim().toLowerCase() === (it.desc || "").trim().toLowerCase());
+      const dup = txs.some(t => t.date === it.date && t.cents === it.cents && t.type === it.type && normDesc(t.description) === normDesc(it.desc));
       if (dup) set.add(it.id);
     });
     return set;
   }, [items, txs]);
-  function approveOne(it) {
-    update(d => ({
-      transactions: [{
-        id: uid(),
-        type: it.type,
-        cents: it.cents,
-        category: it.category,
-        description: it.desc,
-        date: it.date,
-        acctId: it.acctId,
-        status: it.date > todayISO() ? "previsto" : "realizado"
-      }, ...d.transactions]
-    }));
-    removeItem(it.id);
-    toast("Lançamento aprovado.", "success");
-  }
-  function approveAll() {
-    const ready = items.filter(it => it.acctId && !dupIds.has(it.id));
-    if (ready.length === 0) return;
-    const today = todayISO();
-    const entries = ready.map(it => ({
+  // duplicata ENTRE documentos: o caso clássico é o pagamento da fatura, que aparece tanto no extrato da
+  // conta quanto na própria fatura do cartão. Mesmo valor, mesmo tipo, datas próximas, documentos diferentes.
+  const dupEntreDocs = useMemo(() => {
+    const set = new Set();
+    const vistos = [];
+    items.forEach(it => {
+      const tol = it.type === "transferencia" ? 3 : 0;
+      const hit = vistos.find(v => v.docId !== it.docId && v.cents === it.cents && v.type === it.type && daysApart(v.date, it.date) <= tol && (it.type === "transferencia" || normDesc(v.desc) === normDesc(it.desc)));
+      if (hit) set.add(it.id);else vistos.push(it);
+    });
+    return set;
+  }, [items]);
+  const isDup = id => dupHistorico.has(id) || dupEntreDocs.has(id);
+  // assim que um item é marcado como duplicata, ele sai da seleção sozinho (mas continua visível e aprovável)
+  const dupApplied = useRef(new Set());
+  useEffect(() => {
+    const novos = items.filter(it => isDup(it.id) && !dupApplied.current.has(it.id)).map(it => it.id);
+    if (novos.length === 0) return;
+    novos.forEach(id => dupApplied.current.add(id));
+    setItems(its => its.map(it => novos.includes(it.id) ? {
+      ...it,
+      selected: false
+    } : it));
+  }, [dupHistorico, dupEntreDocs]);
+  const itemOk = it => it.acctId && (it.type !== "transferencia" || it.toAcctId && it.toAcctId !== it.acctId);
+  // no celular a lista viria com 8 campos por lançamento — uma fatura de 30 linhas viraria um rolo sem fim.
+  // Cada item aparece resumido em duas linhas e só abre os campos quando a pessoa toca em "ajustar".
+  // O que precisa de decisão (falta conta, falta destino da transferência) já nasce aberto.
+  const isDesktop = useIsDesktop();
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleExpand = id => setExpanded(s => {
+    const n = new Set(s);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+  const nomeConta = id => accounts.find(a => a.id === id)?.name || "conta não escolhida";
+  const prontos = items.filter(it => it.selected && itemOk(it));
+  const pendentes = items.filter(it => it.selected && !itemOk(it));
+  const resumo = useMemo(() => {
+    const s = {
+      gasto: 0,
+      ganho: 0,
+      investimento: 0,
+      transferencia: 0,
+      nTrf: 0
+    };
+    items.filter(it => it.selected).forEach(it => {
+      s[it.type] += it.cents;
+      if (it.type === "transferencia") s.nTrf++;
+    });
+    return s;
+  }, [items]);
+  function toTx(it) {
+    const base = {
       id: uid(),
       type: it.type,
       cents: it.cents,
-      category: it.category,
+      category: it.type === "transferencia" ? "" : it.category,
       description: it.desc,
       date: it.date,
       acctId: it.acctId,
-      status: it.date > today ? "previsto" : "realizado"
-    }));
-    update(d => ({
-      transactions: [...entries, ...d.transactions]
-    }));
-    const readyIds = new Set(ready.map(it => it.id));
-    setItems(items.filter(it => !readyIds.has(it.id)));
-    toast(`${entries.length} lançamentos aprovados.`, "success");
+      status: it.date > todayISO() ? "previsto" : "realizado"
+    };
+    if (it.type === "transferencia") base.toAcctId = it.toAcctId;
+    return base;
   }
-  return /*#__PURE__*/React.createElement("div", {
+  function aprovar(lista) {
+    if (lista.length === 0) return;
+    const entries = lista.map(toTx);
+    // alimenta a memória de categorização com o que foi confirmado aqui: da próxima vez que essa mesma
+    // descrição aparecer (na mão ou noutro extrato), a categoria já vem sugerida sem custar chamada de IA
+    const memoria = {};
+    lista.forEach(it => {
+      if (it.type !== "transferencia" && it.desc.trim()) memoria[it.desc.trim().toLowerCase()] = it.category;
+    });
+    update(d => ({
+      transactions: [...entries, ...d.transactions],
+      categoryMemory: {
+        ...(d.categoryMemory || {}),
+        ...memoria
+      }
+    }));
+    const ids = new Set(lista.map(it => it.id));
+    setItems(its => its.filter(it => !ids.has(it.id)));
+    toast(`${entries.length} lançamento${entries.length === 1 ? "" : "s"} importado${entries.length === 1 ? "" : "s"}.`, "success");
+  }
+  const docsComItens = docs.filter(d => items.some(it => it.docId === d.id));
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("h3", null, "Extrato Inteligente ", /*#__PURE__*/React.createElement(HelpIcon, {
     section: "extrato-ajuda"
   })), /*#__PURE__*/React.createElement("div", {
     className: "sub"
-  }, "Cole o texto copiado do extrato do banco, importe o PDF ou uma foto de recibo — a IA lê e já sugere tipo, categoria e conta de cada lançamento."), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 8,
-      marginBottom: 12,
-      flexWrap: "wrap"
+  }, "Jogue aqui todos os PDFs do mês — extratos das contas e faturas dos cartões, de uma vez. A IA descobre de qual banco é cada documento, se é extrato ou fatura, e separa gasto, entrada, investimento, pagamento de fatura e transferência entre os seus bancos. Nada entra no app antes de você revisar."), /*#__PURE__*/React.createElement("div", {
+    className: "dropzone" + (dragOver ? " over" : ""),
+    onClick: () => fileRef.current?.click(),
+    onDragOver: e => {
+      e.preventDefault();
+      setDragOver(true);
+    },
+    onDragLeave: () => setDragOver(false),
+    onDrop: onDrop,
+    role: "button",
+    tabIndex: 0,
+    onKeyDown: e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        fileRef.current?.click();
+      }
     }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "sbtn",
-    onClick: () => pdfRef.current?.click(),
-    disabled: pdfBusy || photoBusy
   }, /*#__PURE__*/React.createElement(Icon, {
-    name: "brilho",
-    size: 14
-  }), pdfBusy ? "Analisando com IA…" : "Importar PDF do extrato"), /*#__PURE__*/React.createElement("input", {
-    ref: pdfRef,
+    name: "documento",
+    size: 26,
+    style: {
+      opacity: .5
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "dzt"
+  }, "Arraste os PDFs aqui ou clique para escolher"), /*#__PURE__*/React.createElement("div", {
+    className: "dzs"
+  }, "Pode mandar vários de uma vez: extrato do banco A, do banco B, fatura do cartão C…", /*#__PURE__*/React.createElement("br", null), "PDF ou foto (JPG/PNG) de recibo.")), /*#__PURE__*/React.createElement("input", {
+    ref: fileRef,
     type: "file",
-    accept: "application/pdf",
+    accept: "application/pdf,image/*",
+    multiple: true,
     style: {
       display: "none"
     },
-    onChange: handlePdf
-  }), /*#__PURE__*/React.createElement("button", {
-    className: "sbtn",
-    onClick: () => photoRef.current?.click(),
-    disabled: pdfBusy || photoBusy
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "camera",
-    size: 14
-  }), photoBusy ? "Lendo recibo…" : "Ler recibo (foto)"), /*#__PURE__*/React.createElement("input", {
-    ref: photoRef,
+    onChange: e => {
+      addFiles(e.target.files);
+      e.target.value = "";
+    }
+  }), /*#__PURE__*/React.createElement("input", {
+    ref: cameraRef,
     type: "file",
     accept: "image/*",
     capture: "environment",
     style: {
       display: "none"
     },
-    onChange: handlePhoto
-  })), pdfError && /*#__PURE__*/React.createElement("div", {
-    style: {
-      color: "var(--neg)",
-      fontSize: 12,
-      marginBottom: 12
+    onChange: e => {
+      addFiles(e.target.files);
+      e.target.value = "";
     }
-  }, pdfError), photoError && /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
-      color: "var(--neg)",
-      fontSize: 12,
-      marginBottom: 12
+      display: "flex",
+      gap: 8,
+      marginTop: 12,
+      flexWrap: "wrap"
     }
-  }, photoError), /*#__PURE__*/React.createElement("textarea", {
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "sbtn",
+    onClick: () => cameraRef.current?.click()
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "camera",
+    size: 14
+  }), " Fotografar recibo"), /*#__PURE__*/React.createElement("button", {
+    className: "sbtn",
+    onClick: () => setShowText(v => !v)
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "editar",
+    size: 14
+  }), " ", showText ? "Esconder" : "Colar texto"), (docs.length > 0 || items.length > 0) && /*#__PURE__*/React.createElement("button", {
+    className: "sbtn danger",
+    onClick: limparTudo,
+    disabled: running
+  }, "Limpar tudo")), showText && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("textarea", {
     className: "fld",
-    rows: 6,
+    rows: 5,
     style: {
       resize: "vertical",
       fontFamily: "'IBM Plex Mono',monospace",
       fontSize: 13,
-      marginBottom: 10
+      marginBottom: 8
     },
     placeholder: "01/07/2026 Compra Mercado XYZ -150,00\n05/07/2026 PIX recebido 500,00",
     value: text,
     onChange: e => setText(e.target.value)
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 8
-    }
-  }, /*#__PURE__*/React.createElement("button", {
+  }), /*#__PURE__*/React.createElement("button", {
     className: "sbtn primary",
-    onClick: parse,
+    onClick: analisarTexto,
     disabled: !text.trim()
-  }, "Analisar texto"), items.length > 0 && /*#__PURE__*/React.createElement("button", {
-    className: "sbtn",
-    onClick: () => {
-      setItems([]);
-      setText("");
-    }
-  }, "Limpar")), items.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Analisar texto colado"), /*#__PURE__*/React.createElement("p", {
+    className: "hint"
+  }, "Leitura local, sem IA: uma linha por lançamento, no formato \"DD/MM/AAAA descrição valor\". Valor negativo vira gasto, positivo vira ganho."))), docs.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "card",
     style: {
-      marginTop: 16
+      marginTop: 14
     }
-  }, dupIds.size > 0 && /*#__PURE__*/React.createElement("p", {
+  }, running && /*#__PURE__*/React.createElement("div", {
+    className: "aithink"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "aiorb"
+  }, /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("span", {
+    className: "core"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "aibody"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "aititle"
+  }, /*#__PURE__*/React.createElement("span", null, "Analisando seus documentos", /*#__PURE__*/React.createElement("span", {
+    className: "aidots"
+  })), /*#__PURE__*/React.createElement("span", {
+    className: "aipct"
+  }, Math.round(overall * 100), "%")), /*#__PURE__*/React.createElement("div", {
+    className: "aiphase"
+  }, doneCount, " de ", docs.length, " concluído", doneCount === 1 ? "" : "s", currentDoc ? ` · ${DOC_PHASES[currentDoc.status].label}: ${currentDoc.name}` : ""), /*#__PURE__*/React.createElement("div", {
+    className: "aibar"
+  }, /*#__PURE__*/React.createElement("i", {
+    style: {
+      width: `${Math.max(2, overall * 100)}%`
+    }
+  }), /*#__PURE__*/React.createElement("span", null)))), !running && docs.length > 0 && /*#__PURE__*/React.createElement("h3", {
+    style: {
+      marginBottom: 8
+    }
+  }, "Documentos (", docs.length, ")"), docs.map(d => /*#__PURE__*/React.createElement("div", {
+    className: "docrow",
+    key: d.id
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: d.meta?.tipo === "fatura" ? "cartao" : d.meta?.tipo === "recibo" ? "camera" : "documento",
+    size: 15,
+    style: {
+      color: d.status === "erro" ? "var(--neg)" : "var(--text-mut)",
+      flex: "0 0 auto"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "dname"
+  }, d.name), d.status === "pronto" && /*#__PURE__*/React.createElement("span", {
+    className: "dstat",
+    style: {
+      color: "var(--pos)"
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "check",
+    size: 12
+  }), " ", d.count, " lançamento", d.count === 1 ? "" : "s"), d.status === "erro" && /*#__PURE__*/React.createElement("span", {
+    className: "dstat",
+    style: {
+      color: "var(--neg)"
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "alerta",
+    size: 12
+  }), " falhou"), d.status === "fila" && /*#__PURE__*/React.createElement("span", {
+    className: "dstat"
+  }, "na fila"), ["lendo", "ia", "conferindo"].includes(d.status) && /*#__PURE__*/React.createElement("span", {
+    className: "dstat"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "dspin"
+  }), " ", DOC_PHASES[d.status].label, " · ", Math.round(d.progress * 100), "%"), /*#__PURE__*/React.createElement("button", {
+    className: "sbtn iconsbtn",
+    "aria-label": "Remover documento",
+    disabled: running,
+    onClick: () => removeDoc(d.id)
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "fechar",
+    size: 13
+  })))), docs.filter(d => d.status === "erro").map(d => /*#__PURE__*/React.createElement("p", {
     className: "hint",
+    key: d.id,
+    style: {
+      color: "var(--neg)"
+    }
+  }, d.name, ": ", d.error)), docs.filter(d => d.aviso).map(d => /*#__PURE__*/React.createElement("p", {
+    className: "hint",
+    key: d.id,
     style: {
       color: "var(--warn)"
     }
-  }, dupIds.size, " possível", dupIds.size !== 1 ? "eis" : "", " duplicata", dupIds.size !== 1 ? "s" : "", " encontrada", dupIds.size !== 1 ? "s" : "", " (já existe lançamento igual) — deixadas de fora de \"Aprovar todos\", mas podem ser aprovadas individualmente se for intencional."), items.map(it => /*#__PURE__*/React.createElement("div", {
-    key: it.id,
-    className: "miniform"
+  }, d.name, ": ", d.aviso))), items.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("h3", null, "Revisar e importar ", /*#__PURE__*/React.createElement("span", {
+    className: "aipct"
+  }, prontos.length, " de ", items.length)), /*#__PURE__*/React.createElement("div", {
+    className: "sub"
+  }, "Confira o que a IA entendeu. Desmarque o que não quiser, ajuste conta, tipo e categoria — e importe tudo de uma vez."), /*#__PURE__*/React.createElement("div", {
+    className: "stats",
+    style: {
+      marginBottom: 14
+    }
   }, /*#__PURE__*/React.createElement("div", {
-    className: "row2",
+    className: "stat"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "k"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "enviar",
+    size: 12
+  }), "Gastos"), /*#__PURE__*/React.createElement("div", {
+    className: "v",
     style: {
-      marginBottom: 8,
-      alignItems: "center"
+      color: "var(--neg)"
     }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "num",
+  }, brl(resumo.gasto))), /*#__PURE__*/React.createElement("div", {
+    className: "stat"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "k"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "baixar",
+    size: 12
+  }), "Entradas"), /*#__PURE__*/React.createElement("div", {
+    className: "v",
     style: {
-      fontSize: 13,
-      color: "var(--text-mut)",
-      flex: "0 0 auto"
+      color: "var(--pos)"
     }
-  }, new Date(it.date + "T00:00:00").toLocaleDateString("pt-BR")), /*#__PURE__*/React.createElement("span", {
+  }, brl(resumo.ganho))), /*#__PURE__*/React.createElement("div", {
+    className: "stat"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "k"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "investimentos",
+    size: 12
+  }), "Investido"), /*#__PURE__*/React.createElement("div", {
+    className: "v",
     style: {
-      fontSize: 13
+      color: "var(--inv)"
     }
-  }, it.desc || "—", dupIds.has(it.id) && /*#__PURE__*/React.createElement("span", {
-    className: "tag warn",
+  }, brl(resumo.investimento))), /*#__PURE__*/React.createElement("div", {
+    className: "stat"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "k"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "transferencia",
+    size: 12
+  }), "Transferências"), /*#__PURE__*/React.createElement("div", {
+    className: "v",
     style: {
-      marginLeft: 8
+      color: "var(--trf)"
     }
-  }, "possível duplicata")), /*#__PURE__*/React.createElement("div", {
+  }, resumo.nTrf, " · ", brl(resumo.transferencia)))), (dupHistorico.size > 0 || dupEntreDocs.size > 0) && /*#__PURE__*/React.createElement("p", {
+    className: "hint",
     style: {
-      flex: "0 0 150px",
-      minWidth: 130
+      color: "var(--warn)",
+      marginTop: 0,
+      marginBottom: 10
     }
-  }, /*#__PURE__*/React.createElement(Money, {
-    cents: it.cents,
-    onChange: v => updateItem(it.id, {
-      cents: v
-    }),
-    small: true
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "row2"
-  }, /*#__PURE__*/React.createElement("select", {
-    className: "fld",
-    value: it.type,
-    onChange: e => {
-      const type = e.target.value;
-      updateItem(it.id, {
-        type,
-        category: CATS[type][0][0]
-      });
-    }
-  }, Object.entries(TYPES).filter(([k]) => k !== "transferencia").map(([k, v]) => /*#__PURE__*/React.createElement("option", {
-    key: k,
-    value: k
-  }, v.label))), /*#__PURE__*/React.createElement("select", {
-    className: "fld",
-    value: it.category,
-    onChange: e => updateItem(it.id, {
-      category: e.target.value
-    })
-  }, CATS[it.type].map(([name]) => /*#__PURE__*/React.createElement("option", {
-    key: name,
-    value: name
-  }, name))), /*#__PURE__*/React.createElement("select", {
-    className: "fld",
-    value: it.acctId,
-    onChange: e => updateItem(it.id, {
-      acctId: e.target.value
-    })
-  }, /*#__PURE__*/React.createElement("option", {
-    value: ""
-  }, "Conta…"), accounts.map(a => /*#__PURE__*/React.createElement("option", {
-    key: a.id,
-    value: a.id
-  }, a.name)))), /*#__PURE__*/React.createElement("div", {
+  }, dupHistorico.size > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, dupHistorico.size, " item(ns) já existem no seu histórico. "), dupEntreDocs.size > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, dupEntreDocs.size, " item(ns) aparecem em dois documentos ao mesmo tempo (típico do pagamento da fatura, que sai no extrato e chega na fatura). "), "Já vieram desmarcados — marque de novo se forem lançamentos legítimos e diferentes."), pendentes.length > 0 && /*#__PURE__*/React.createElement("p", {
+    className: "hint",
     style: {
-      display: "flex",
-      gap: 8,
-      marginTop: 8
+      color: "var(--warn)",
+      marginTop: 0,
+      marginBottom: 10
     }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "sbtn primary",
-    disabled: !it.acctId,
-    onClick: () => approveOne(it)
+  }, pendentes.length, " item(ns) marcados ainda estão sem conta (ou sem o destino da transferência) e não serão importados até você escolher."), docsComItens.map(doc => {
+    const docItems = items.filter(it => it.docId === doc.id);
+    const selDoc = docItems.filter(it => it.selected);
+    const acct = accounts.find(a => a.id === doc.meta?.contaId);
+    const tipo = doc.meta?.tipo || "outro";
+    return /*#__PURE__*/React.createElement("div", {
+      key: doc.id
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "dochead"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "badge " + tipo
+    }, DOC_TIPO_LABEL[tipo]), /*#__PURE__*/React.createElement("b", {
+      style: {
+        fontSize: 13
+      }
+    }, doc.meta?.banco || doc.name), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: "var(--text-mut)"
+      }
+    }, doc.meta?.periodoInicio && doc.meta?.periodoFim ? `${fmtDateBR(doc.meta.periodoInicio)} a ${fmtDateBR(doc.meta.periodoFim)} · ` : "", docItems.length, " lançamento", docItems.length === 1 ? "" : "s", doc.meta?.totalDocumento > 0 ? ` · total ${brl(doc.meta.totalDocumento)}` : ""), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginLeft: "auto",
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: "var(--text-mut)"
+      }
+    }, tipo === "fatura" ? "Cartão:" : "Conta:"), /*#__PURE__*/React.createElement("select", {
+      className: "fld",
+      style: {
+        width: "auto",
+        minWidth: 150,
+        padding: "7px 10px",
+        fontSize: 13
+      },
+      value: doc.meta?.contaId || "",
+      onChange: e => setDocAccount(doc.id, e.target.value)
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "Escolher…"), accounts.map(a => /*#__PURE__*/React.createElement("option", {
+      key: a.id,
+      value: a.id
+    }, a.name, a.kind === "cartao" ? " (cartão)" : ""))), /*#__PURE__*/React.createElement("button", {
+      className: "sbtn",
+      onClick: () => setItems(its => its.map(it => it.docId === doc.id ? {
+        ...it,
+        selected: selDoc.length !== docItems.length
+      } : it))
+    }, selDoc.length === docItems.length ? "Desmarcar todos" : "Marcar todos"))), /*#__PURE__*/React.createElement("div", {
+      className: "docbody"
+    }, doc.meta?.observacao && /*#__PURE__*/React.createElement("p", {
+      className: "hint",
+      style: {
+        marginTop: 0,
+        marginBottom: 8
+      }
+    }, doc.meta.observacao, doc.meta.confianca != null ? ` · confiança ${Math.round(doc.meta.confianca * 100)}%` : ""), acct && tipo === "fatura" && acct.kind !== "cartao" && /*#__PURE__*/React.createElement("p", {
+      className: "hint",
+      style: {
+        color: "var(--warn)",
+        marginTop: 0
+      }
+    }, "Esta é uma fatura de cartão, mas a conta escolhida não é um cartão — os gastos vão entrar na conta bancária."), docItems.map(it => {
+      const dup = isDup(it.id);
+      const falta = !itemOk(it);
+      const aberto = isDesktop || expanded.has(it.id) || falta;
+      return /*#__PURE__*/React.createElement("div", {
+        className: "itemrow" + (it.selected ? "" : " off"),
+        key: it.id
+      }, /*#__PURE__*/React.createElement("input", {
+        type: "checkbox",
+        checked: it.selected,
+        onChange: e => updateItem(it.id, {
+          selected: e.target.checked
+        }),
+        "aria-label": "Importar este lançamento"
+      }), /*#__PURE__*/React.createElement("div", {
+        style: {
+          flex: 1,
+          minWidth: 0
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "row2",
+        style: {
+          marginBottom: aberto ? 6 : 0,
+          alignItems: "center"
+        }
+      }, /*#__PURE__*/React.createElement("span", {
+        className: "num",
+        style: {
+          fontSize: 12,
+          color: "var(--text-mut)",
+          flex: "0 0 auto",
+          minWidth: 0
+        }
+      }, fmtDateBR(it.date)), /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 13,
+          flex: "2 1 200px"
+        }
+      }, it.desc || "—", dup && /*#__PURE__*/React.createElement("span", {
+        className: "tag warn",
+        style: {
+          marginLeft: 6
+        }
+      }, "duplicata"), it.confidence != null && it.confidence < 0.6 && /*#__PURE__*/React.createElement("span", {
+        className: "tag warn",
+        style: {
+          marginLeft: 6
+        }
+      }, "conferir"), it.natureza === "pagamento_fatura" && /*#__PURE__*/React.createElement("span", {
+        className: "tag ok",
+        style: {
+          marginLeft: 6
+        }
+      }, "pagamento de fatura"), (it.natureza === "transferencia_saida" || it.natureza === "transferencia_entrada") && /*#__PURE__*/React.createElement("span", {
+        className: "tag ok",
+        style: {
+          marginLeft: 6
+        }
+      }, "entre bancos"), it.natureza === "estorno" && /*#__PURE__*/React.createElement("span", {
+        className: "tag ok",
+        style: {
+          marginLeft: 6
+        }
+      }, "estorno")), aberto ? /*#__PURE__*/React.createElement("div", {
+        style: {
+          flex: "0 0 165px",
+          minWidth: 150
+        }
+      }, /*#__PURE__*/React.createElement(Money, {
+        cents: it.cents,
+        onChange: v => updateItem(it.id, {
+          cents: v
+        }),
+        small: true
+      })) : /*#__PURE__*/React.createElement("span", {
+        className: "num",
+        style: {
+          flex: "0 0 auto",
+          minWidth: 0,
+          fontSize: 14,
+          fontWeight: 500,
+          whiteSpace: "nowrap",
+          color: VALOR_COR[it.type]
+        }
+      }, brl(it.cents))), !aberto && /*#__PURE__*/React.createElement("button", {
+        type: "button",
+        className: "itemsummary",
+        onClick: () => toggleExpand(it.id)
+      }, /*#__PURE__*/React.createElement("span", null, TYPES[it.type].label, " · ", it.type === "transferencia" ? `${nomeConta(it.acctId)} → ${nomeConta(it.toAcctId)}` : `${it.category} · ${nomeConta(it.acctId)}`), /*#__PURE__*/React.createElement("b", null, "ajustar")), aberto && /*#__PURE__*/React.createElement("div", {
+        className: "row2",
+        style: {
+          marginBottom: 0
+        }
+      }, /*#__PURE__*/React.createElement("select", {
+        className: "fld",
+        value: it.type,
+        onChange: e => {
+          const type = e.target.value;
+          updateItem(it.id, {
+            type,
+            category: type === "transferencia" ? "" : CATS[type][0][0],
+            toAcctId: type === "transferencia" ? it.toAcctId : ""
+          });
+        }
+      }, Object.entries(TYPES).map(([k, v]) => /*#__PURE__*/React.createElement("option", {
+        key: k,
+        value: k
+      }, v.label))), it.type === "transferencia" ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
+        className: "fld",
+        value: it.acctId,
+        onChange: e => updateItem(it.id, {
+          acctId: e.target.value
+        })
+      }, /*#__PURE__*/React.createElement("option", {
+        value: ""
+      }, "Sai de…"), accounts.map(a => /*#__PURE__*/React.createElement("option", {
+        key: a.id,
+        value: a.id
+      }, "Sai de ", a.name))), /*#__PURE__*/React.createElement("select", {
+        className: "fld",
+        value: it.toAcctId || "",
+        onChange: e => updateItem(it.id, {
+          toAcctId: e.target.value
+        })
+      }, /*#__PURE__*/React.createElement("option", {
+        value: ""
+      }, "Entra em…"), accounts.map(a => /*#__PURE__*/React.createElement("option", {
+        key: a.id,
+        value: a.id
+      }, "Entra em ", a.name)))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("select", {
+        className: "fld",
+        value: it.category,
+        onChange: e => updateItem(it.id, {
+          category: e.target.value
+        })
+      }, CATS[it.type].map(([name]) => /*#__PURE__*/React.createElement("option", {
+        key: name,
+        value: name
+      }, name))), /*#__PURE__*/React.createElement("select", {
+        className: "fld",
+        value: it.acctId,
+        onChange: e => updateItem(it.id, {
+          acctId: e.target.value
+        })
+      }, /*#__PURE__*/React.createElement("option", {
+        value: ""
+      }, "Conta…"), accounts.map(a => /*#__PURE__*/React.createElement("option", {
+        key: a.id,
+        value: a.id
+      }, a.name))))), aberto && !isDesktop && !falta && /*#__PURE__*/React.createElement("button", {
+        type: "button",
+        className: "itemsummary",
+        onClick: () => toggleExpand(it.id)
+      }, /*#__PURE__*/React.createElement("span", null), /*#__PURE__*/React.createElement("b", null, "recolher")), falta && it.selected && /*#__PURE__*/React.createElement("div", {
+        className: "hint",
+        style: {
+          color: "var(--warn)",
+          marginTop: 4
+        }
+      }, "Falta escolher ", it.type === "transferencia" ? "as duas contas da transferência" : "a conta", ".")), /*#__PURE__*/React.createElement("button", {
+        className: "sbtn iconsbtn",
+        "aria-label": "Descartar",
+        onClick: () => removeItem(it.id)
+      }, /*#__PURE__*/React.createElement(Icon, {
+        name: "excluir",
+        size: 13
+      })));
+    }), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        gap: 8,
+        marginTop: 10,
+        flexWrap: "wrap"
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "sbtn primary",
+      disabled: selDoc.filter(itemOk).length === 0,
+      onClick: () => aprovar(selDoc.filter(itemOk))
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "check",
+      size: 14
+    }), " Importar deste documento (", selDoc.filter(itemOk).length, ")"))));
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "submit",
+    onClick: () => aprovar(prontos),
+    disabled: prontos.length === 0
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "check",
-    size: 14
-  }), " Aprovar"), /*#__PURE__*/React.createElement("button", {
-    className: "sbtn",
-    onClick: () => removeItem(it.id)
-  }, "Descartar")))), /*#__PURE__*/React.createElement("button", {
-    className: "submit",
-    onClick: approveAll
-  }, "Aprovar todos selecionados (", items.filter(it => it.acctId && !dupIds.has(it.id)).length, ")")), items.length === 0 && /*#__PURE__*/React.createElement("p", {
-    className: "hint"
-  }, "Dica: cole linhas no formato \"DD/MM/AAAA descrição valor\", ex: 01/07/2026 Compra Mercado -150,00. Valores negativos viram gasto, positivos viram ganho."));
+    size: 16
+  }), " Importar ", prontos.length, " lançamento", prontos.length === 1 ? "" : "s", " de ", docsComItens.length, " documento", docsComItens.length === 1 ? "" : "s")));
 }
 Extrato = React.memo(Extrato);
 
@@ -8121,7 +9233,7 @@ const HELP_SECTIONS = [{
   id: "extrato-ajuda",
   n: 8,
   title: "Extrato Inteligente",
-  kw: "extrato pdf recibo foto importar colar texto duplicata auditoria fatura"
+  kw: "extrato pdf recibo foto importar colar texto duplicata auditoria fatura vários múltiplos bancos open finance lote arrastar progresso ia modelo transferência entre bancos pagamento de fatura"
 }, {
   id: "assistente-ajuda",
   n: 9,
@@ -8612,52 +9724,90 @@ function Ajuda({
     id: "extrato-ajuda",
     n: 8,
     title: "Extrato Inteligente",
-    purpose: "Importar vários lançamentos de uma vez, a partir de um extrato ou de um recibo.",
-    steps: ["Cole o texto do extrato do banco, ou importe o PDF direto — a IA lê e já sugere tipo, categoria e conta de cada linha.", "Tire uma foto de um recibo/nota fiscal pra ler um lançamento único.", "Revise cada item antes de aprovar — nada é salvo automaticamente.", "Itens que parecem duplicados (mesma data, valor, tipo e descrição de algo já registrado) ficam marcados e de fora do \"Aprovar todos\", mas podem ser aprovados individualmente.", "Em Contas, o botão de auditoria de fatura compara o texto colado da fatura com o que já está registrado naquele cartão naquele mês."],
-    tip: "Sem internet ou sem IA disponível, o texto colado ainda é lido localmente (um formato simples: data, descrição e valor por linha)."
+    purpose: "Fechar o mês inteiro de uma vez: joga todos os PDFs dos seus bancos e cartões, a IA lê, identifica e classifica tudo.",
+    steps: ["Arraste (ou escolha) TODOS os documentos do mês de uma vez: extrato do banco A, extrato do banco B, fatura do cartão C. Pode misturar PDF e foto de recibo.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide se é extrato ou fatura, de qual banco é, e casa com a conta ou cartão que você já cadastrou. Se errar a conta, o seletor no cabeçalho do documento troca todos os lançamentos dele de uma vez.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
+    tip: "Se a IA estiver fora do ar ou sem cota, o PDF ainda é lido localmente pelo leitor embutido (só reconhece gasto e ganho, sem identificar banco nem transferência). Em Configurações dá para trocar o motor de IA entre Rápido e Cuidadoso — vale mudar para Cuidadoso quando alguma fatura vier com muitas linhas erradas. Arquivos acima de 3 MB podem não caber numa leitura só."
   }, /*#__PURE__*/React.createElement(HelpExample, {
-    label: "item revisado antes de aprovar"
+    label: "a IA lendo a fila de documentos"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "miniform"
+    className: "aithink"
   }, /*#__PURE__*/React.createElement("div", {
-    className: "row2",
+    className: "aiorb"
+  }, /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("span", {
+    className: "core"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "aibody"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "aititle"
+  }, /*#__PURE__*/React.createElement("span", null, "Analisando seus documentos"), /*#__PURE__*/React.createElement("span", {
+    className: "aipct"
+  }, "62%")), /*#__PURE__*/React.createElement("div", {
+    className: "aiphase"
+  }, "2 de 3 concluídos · IA lendo o documento: fatura-cartao-julho.pdf"), /*#__PURE__*/React.createElement("div", {
+    className: "aibar"
+  }, /*#__PURE__*/React.createElement("i", {
     style: {
-      marginBottom: 8,
-      alignItems: "center"
+      width: "62%"
     }
+  }), /*#__PURE__*/React.createElement("span", null))))), /*#__PURE__*/React.createElement(HelpExample, {
+    label: "documento identificado e classificado"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "dochead"
   }, /*#__PURE__*/React.createElement("span", {
-    className: "num",
-    style: {
-      fontSize: 13,
-      color: "var(--text-mut)",
-      flex: "0 0 auto"
-    }
-  }, "05/07/2026"), /*#__PURE__*/React.createElement("span", {
+    className: "badge fatura"
+  }, "Fatura"), /*#__PURE__*/React.createElement("b", {
     style: {
       fontSize: 13
     }
-  }, "Compra Mercado XYZ ", /*#__PURE__*/React.createElement("span", {
-    className: "tag warn",
+  }, "Nubank"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: "var(--text-mut)"
+    }
+  }, "01/07/2026 a 31/07/2026 · 24 lançamentos · total R$ 1.842,30")), /*#__PURE__*/React.createElement("div", {
+    className: "docbody"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "itemrow"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: true,
+    readOnly: true,
+    tabIndex: -1
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 13
+    }
+  }, "10/07/2026 · Pagamento recebido ", /*#__PURE__*/React.createElement("span", {
+    className: "tag ok",
     style: {
       marginLeft: 6
     }
-  }, "possível duplicata"))), /*#__PURE__*/React.createElement("div", {
+  }, "pagamento de fatura"), /*#__PURE__*/React.createElement("div", {
+    className: "mm",
     style: {
-      display: "flex",
-      gap: 8
+      marginTop: 4
     }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "sbtn primary",
-    type: "button",
+  }, "Vira transferência: sai da Conta Corrente e entra no Cartão Roxo — não conta como gasto."))), /*#__PURE__*/React.createElement("div", {
+    className: "itemrow"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: true,
+    readOnly: true,
     tabIndex: -1
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "check",
-    size: 14
-  }), " Aprovar"), /*#__PURE__*/React.createElement("button", {
-    className: "sbtn",
-    type: "button",
-    tabIndex: -1
-  }, "Descartar"))))), visible("assistente-ajuda") && /*#__PURE__*/React.createElement(HelpSection, {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 13
+    }
+  }, "12/07/2026 · Mercado XYZ (3/10)", /*#__PURE__*/React.createElement("div", {
+    className: "mm",
+    style: {
+      marginTop: 4
+    }
+  }, "Vira gasto em Alimentação, no Cartão Roxo.")))))), visible("assistente-ajuda") && /*#__PURE__*/React.createElement(HelpSection, {
     id: "assistente-ajuda",
     n: 9,
     title: "Assistente",
