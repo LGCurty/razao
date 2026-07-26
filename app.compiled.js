@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.4 · compilado em 2026-07-26T02:30:23.837Z */
+   Versão 1.2.5 · compilado em 2026-07-26T04:17:54.344Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.2.5";
 const APP_BUILD = "2026-07-26";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -1777,10 +1777,12 @@ function openHelp(sectionId) {
   helpListener && helpListener(sectionId);
 }
 // mesmo padrão do openHelp: deixa qualquer cartão mandar a pessoa para a aba certa (ex: o estado
-// vazio do Balanço oferecendo a importação do banco como caminho rápido)
+// vazio do Balanço oferecendo a importação do banco como caminho rápido). O segundo argumento
+// (opcional) carrega um filtro pra aplicar assim que a aba de destino abrir — é o que permite
+// clicar numa categoria/tag no Panorama e já chegar no Balanço com a lista filtrada.
 let tabListener = null;
-function goToTab(tab) {
-  tabListener && tabListener(tab);
+function goToTab(tab, filter) {
+  tabListener && tabListener(tab, filter);
 }
 
 /* ---- diálogo de confirmação (substitui confirm()/exclusões silenciosas) ---- */
@@ -2829,6 +2831,9 @@ function App() {
   const [view, setView] = useState(new Date());
   const [tab, setTab] = useState("balanco");
   const [helpTarget, setHelpTarget] = useState(null);
+  // filtro pendente pra aplicar assim que a aba de destino abrir (ver goToTab) — ex: clicar numa
+  // categoria no Panorama chega no Balanço já com aquela categoria filtrada na lista
+  const [pendingFilter, setPendingFilter] = useState(null);
   useEffect(() => {
     helpListener = sectionId => {
       setHelpTarget(sectionId);
@@ -2839,9 +2844,10 @@ function App() {
     };
   }, []);
   useEffect(() => {
-    tabListener = t => {
+    tabListener = (t, filter) => {
       setTab(t);
       setMoreOpen(false);
+      if (filter) setPendingFilter(filter);
     };
     return () => {
       tabListener = null;
@@ -3661,7 +3667,9 @@ function App() {
     categoryMemory,
     hourlyWageCents: settings?.hourlyWageCents || 0,
     budgetRows,
-    aiModel: settings?.aiModel || "rapido"
+    aiModel: settings?.aiModel || "rapido",
+    pendingFilter,
+    onConsumePendingFilter: () => setPendingFilter(null)
   }), tab === "orcamento" && /*#__PURE__*/React.createElement(Orcamento, {
     budgetRows,
     budgets,
@@ -4556,7 +4564,9 @@ function Balanco({
   categoryMemory,
   hourlyWageCents,
   budgetRows,
-  aiModel
+  aiModel,
+  pendingFilter,
+  onConsumePendingFilter
 }) {
   // Fase 4: busca + filtros combináveis, unificando também os filtros por clique nos gráficos (categoria/tipo).
   // Passam a valer em todos os meses (não só o exibido) — exceto quando um intervalo de datas é definido.
@@ -4573,6 +4583,19 @@ function Balanco({
     valueMax: ""
   });
   const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+  // filtro chegado de outra aba (ex: clique numa categoria no Panorama) — aplica uma vez e avisa o
+  // App pra descartá-lo, senão reabrir o Balanço do zero reaplicaria o mesmo filtro de novo
+  useEffect(() => {
+    if (!pendingFilter) return;
+    if (pendingFilter.category) setFilters(f => ({
+      ...f,
+      categories: [pendingFilter.category]
+    }));else if (pendingFilter.tag) setFilters(f => ({
+      ...f,
+      tags: [pendingFilter.tag]
+    }));
+    onConsumePendingFilter && onConsumePendingFilter();
+  }, [pendingFilter]);
   const [aiSummary, setAiSummary] = useState("");
   const [aiSummaryBusy, setAiSummaryBusy] = useState(false);
   const [aiSummaryError, setAiSummaryError] = useState("");
@@ -6396,6 +6419,11 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
   })), byCatAll.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "card g-12"
   }, /*#__PURE__*/React.createElement("h3", null, "Gastos por categoria (todo o período)"), /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 0
+    }
+  }, "Clique numa categoria pra ver os lançamentos no Balanço."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 18,
@@ -6404,14 +6432,20 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
     }
   }, /*#__PURE__*/React.createElement(Donut, {
     data: byCatAll,
-    centerLabel: "gastos"
+    centerLabel: "gastos",
+    onSelect: name => goToTab("balanco", {
+      category: name
+    })
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       minWidth: 180
     }
   }, /*#__PURE__*/React.createElement(Legend, {
-    data: byCatAll
+    data: byCatAll,
+    onSelect: name => goToTab("balanco", {
+      category: name
+    })
   })))), byTagAll.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "card g-12"
   }, /*#__PURE__*/React.createElement("h3", null, "Gasto por tag (todo o período)"), /*#__PURE__*/React.createElement("div", {
@@ -6419,7 +6453,7 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
     style: {
       marginBottom: 0
     }
-  }, "Somado a partir das #tags usadas na descrição dos lançamentos."), /*#__PURE__*/React.createElement("div", {
+  }, "Somado a partir das #tags usadas na descrição dos lançamentos. Clique numa tag pra ver os lançamentos no Balanço."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 18,
@@ -6428,14 +6462,20 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
     }
   }, /*#__PURE__*/React.createElement(Donut, {
     data: byTagAll,
-    centerLabel: "gasto"
+    centerLabel: "gasto",
+    onSelect: name => goToTab("balanco", {
+      tag: name.replace(/^#/, "")
+    })
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       minWidth: 180
     }
   }, /*#__PURE__*/React.createElement(Legend, {
-    data: byTagAll
+    data: byTagAll,
+    onSelect: name => goToTab("balanco", {
+      tag: name.replace(/^#/, "")
+    })
   })))));
 }
 Geral = React.memo(Geral);

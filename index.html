@@ -550,7 +550,7 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.2.5";
 const APP_BUILD = "2026-07-26";
 
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
@@ -1293,9 +1293,11 @@ function Sheet({ open, onClose, title, children, returnFocusRef }){
 let helpListener=null;
 function openHelp(sectionId){ helpListener && helpListener(sectionId); }
 // mesmo padrão do openHelp: deixa qualquer cartão mandar a pessoa para a aba certa (ex: o estado
-// vazio do Balanço oferecendo a importação do banco como caminho rápido)
+// vazio do Balanço oferecendo a importação do banco como caminho rápido). O segundo argumento
+// (opcional) carrega um filtro pra aplicar assim que a aba de destino abrir — é o que permite
+// clicar numa categoria/tag no Panorama e já chegar no Balanço com a lista filtrada.
 let tabListener=null;
-function goToTab(tab){ tabListener && tabListener(tab); }
+function goToTab(tab, filter){ tabListener && tabListener(tab, filter); }
 
 /* ---- diálogo de confirmação (substitui confirm()/exclusões silenciosas) ---- */
 let confirmListener=null;
@@ -1779,8 +1781,11 @@ function App(){
   const [view,setView]=useState(new Date());
   const [tab,setTab]=useState("balanco");
   const [helpTarget,setHelpTarget]=useState(null);
+  // filtro pendente pra aplicar assim que a aba de destino abrir (ver goToTab) — ex: clicar numa
+  // categoria no Panorama chega no Balanço já com aquela categoria filtrada na lista
+  const [pendingFilter,setPendingFilter]=useState(null);
   useEffect(()=>{ helpListener=(sectionId)=>{ setHelpTarget(sectionId); setTab("ajuda"); }; return ()=>{ helpListener=null; }; },[]);
-  useEffect(()=>{ tabListener=(t)=>{ setTab(t); setMoreOpen(false); }; return ()=>{ tabListener=null; }; },[]);
+  useEffect(()=>{ tabListener=(t,filter)=>{ setTab(t); setMoreOpen(false); if(filter) setPendingFilter(filter); }; return ()=>{ tabListener=null; }; },[]);
   // popover do mês e menu "⋯" são mutuamente exclusivos por construção (só um valor guardado);
   // setMonthPicker/setMenu abaixo são compatíveis com o uso anterior (booleano ou função de toggle)
   const [activePopover,setActivePopover]=useState(null); // "month" | "menu" | null
@@ -2262,7 +2267,7 @@ function App(){
                 <button className="sbtn" onClick={()=>window.location.reload()}><Icon name="brilho" size={14}/> Atualizar agora</button>
               </div>}
             {tab==="geral" && <Geral {...{txs,accounts,holdings,view,onSelectMonth:selectMonth,monthIndex,update,patrimonyHistory,recaps,aiModel:settings?.aiModel||"rapido"}}/>}
-            {tab==="balanco" && <Balanco {...{grouped,monthLabel,totals,prevTotals,sparkline,plannedTotal,alerts,byCatChart,acctName,txs,view,accounts,onSelectMonth:selectMonth,update,isDesktop,onEditMobile:openEditMobile,monthIndex,categoryMemory,hourlyWageCents:settings?.hourlyWageCents||0,budgetRows,aiModel:settings?.aiModel||"rapido"}}/>}
+            {tab==="balanco" && <Balanco {...{grouped,monthLabel,totals,prevTotals,sparkline,plannedTotal,alerts,byCatChart,acctName,txs,view,accounts,onSelectMonth:selectMonth,update,isDesktop,onEditMobile:openEditMobile,monthIndex,categoryMemory,hourlyWageCents:settings?.hourlyWageCents||0,budgetRows,aiModel:settings?.aiModel||"rapido",pendingFilter,onConsumePendingFilter:()=>setPendingFilter(null)}}/>}
             {tab==="orcamento" && <Orcamento {...{budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts}}/>}
             {tab==="metas" && <Metas {...{goals,update,txs}}/>}
             {tab==="investimentos" && <Investimentos {...{holdings,update,monthIndex,monthLabel,txs,view,onSelectMonth:selectMonth}}/>}
@@ -2688,12 +2693,20 @@ Dois ou três períodos com o veredito do mês: sobrou ou faltou, e por quê.
 ## O que fazer agora
 Exatamente 3 ações concretas e específicas, cada uma com o número que a justifica.`;
 
-function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTotal, alerts, byCatChart, acctName, txs, view, accounts, onSelectMonth, update, isDesktop, onEditMobile, monthIndex, categoryMemory, hourlyWageCents, budgetRows, aiModel }){
+function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTotal, alerts, byCatChart, acctName, txs, view, accounts, onSelectMonth, update, isDesktop, onEditMobile, monthIndex, categoryMemory, hourlyWageCents, budgetRows, aiModel, pendingFilter, onConsumePendingFilter }){
   // Fase 4: busca + filtros combináveis, unificando também os filtros por clique nos gráficos (categoria/tipo).
   // Passam a valer em todos os meses (não só o exibido) — exceto quando um intervalo de datas é definido.
   const [search,setSearch]=useState("");
   const [filters,setFilters]=useState({accounts:[],types:[],categories:[],tags:[],dateFrom:"",dateTo:"",status:"",valueMin:"",valueMax:""});
   const [filterSheetOpen,setFilterSheetOpen]=useState(false);
+  // filtro chegado de outra aba (ex: clique numa categoria no Panorama) — aplica uma vez e avisa o
+  // App pra descartá-lo, senão reabrir o Balanço do zero reaplicaria o mesmo filtro de novo
+  useEffect(()=>{
+    if(!pendingFilter) return;
+    if(pendingFilter.category) setFilters(f=>({...f,categories:[pendingFilter.category]}));
+    else if(pendingFilter.tag) setFilters(f=>({...f,tags:[pendingFilter.tag]}));
+    onConsumePendingFilter && onConsumePendingFilter();
+  },[pendingFilter]);
   const [aiSummary,setAiSummary]=useState("");
   const [aiSummaryBusy,setAiSummaryBusy]=useState(false);
   const [aiSummaryError,setAiSummaryError]=useState("");
@@ -3573,19 +3586,20 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
       {byCatAll.length>0 &&
         <div className="card g-12">
           <h3>Gastos por categoria (todo o período)</h3>
+          <div className="sub" style={{marginBottom:0}}>Clique numa categoria pra ver os lançamentos no Balanço.</div>
           <div style={{display:"flex",gap:18,alignItems:"center",flexWrap:"wrap"}}>
-            <Donut data={byCatAll} centerLabel="gastos"/>
-            <div style={{flex:1,minWidth:180}}><Legend data={byCatAll}/></div>
+            <Donut data={byCatAll} centerLabel="gastos" onSelect={(name)=>goToTab("balanco",{category:name})}/>
+            <div style={{flex:1,minWidth:180}}><Legend data={byCatAll} onSelect={(name)=>goToTab("balanco",{category:name})}/></div>
           </div>
         </div>}
 
       {byTagAll.length>0 &&
         <div className="card g-12">
           <h3>Gasto por tag (todo o período)</h3>
-          <div className="sub" style={{marginBottom:0}}>Somado a partir das #tags usadas na descrição dos lançamentos.</div>
+          <div className="sub" style={{marginBottom:0}}>Somado a partir das #tags usadas na descrição dos lançamentos. Clique numa tag pra ver os lançamentos no Balanço.</div>
           <div style={{display:"flex",gap:18,alignItems:"center",flexWrap:"wrap"}}>
-            <Donut data={byTagAll} centerLabel="gasto"/>
-            <div style={{flex:1,minWidth:180}}><Legend data={byTagAll}/></div>
+            <Donut data={byTagAll} centerLabel="gasto" onSelect={(name)=>goToTab("balanco",{tag:name.replace(/^#/,"")})}/>
+            <div style={{flex:1,minWidth:180}}><Legend data={byTagAll} onSelect={(name)=>goToTab("balanco",{tag:name.replace(/^#/,"")})}/></div>
           </div>
         </div>}
     </React.Fragment>
