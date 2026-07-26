@@ -476,6 +476,13 @@ body{background:#08090D}
 .rz .sheetlistitem:hover{background:var(--surface-2)}
 .rz .sheetlistitem.danger{color:var(--neg)}
 .rz .sheetdivider{height:1px;background:var(--hairline);margin:6px 0}
+.rz .colorgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr));gap:9px;margin-bottom:10px}
+.rz .colorswatch{width:38px;height:38px;border-radius:50%;border:2px solid transparent;background:var(--sw);
+  cursor:pointer;display:grid;place-items:center;padding:0;box-shadow:0 1px 2px rgba(0,0,0,.15);
+  transition:transform .12s ease,box-shadow .12s ease;color:#fff}
+.rz .colorswatch:hover{transform:scale(1.1)}
+.rz .colorswatch:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.rz .colorswatch.on{border-color:var(--text);box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--text)}
 @keyframes sheetup{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @keyframes fadein{from{opacity:0}to{opacity:1}}
 @media (min-width:768px){
@@ -550,7 +557,7 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.5";
+const APP_VERSION = "1.2.6";
 const APP_BUILD = "2026-07-26";
 
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
@@ -1087,7 +1094,7 @@ const SEED = {
   accounts:[{id:"a1",name:"Conta principal",kind:"conta",color:"#3B63C4"},{id:"c1",name:"Cartão de crédito",kind:"cartao",color:"#A57BE0"}],
   budgets:{}, budgetExceptions:{}, goals:[], holdings:[],
   categoryMemory:{}, patrimonyHistory:{}, recaps:{weekly:{},monthly:{}},
-  settings:{hourlyWageCents:0, aiModel:"rapido"},
+  settings:{hourlyWageCents:0, aiModel:"rapido", colorTheme:"aco"},
 };
 const SCHEMA_VERSION = 4;
 /* migrate() é idempotente: leva qualquer versão anterior (inclusive dados sem o campo schemaVersion,
@@ -1108,8 +1115,10 @@ function migrate(data){
   d.goals = (d.goals||[]).map(g=>({ linkedCategory:null, ...g }));
   // 4.0 — preço em horas de trabalho (opcional): 0 = recurso desligado, não aparece em lugar nenhum
   // 4.1 — escolha do motor de IA usada na leitura de documentos ("rapido" | "cuidadoso")
-  d.settings = { hourlyWageCents:0, aiModel:"rapido", ...(d.settings||{}) };
+  // 4.2 — cor de marca escolhível (Configurações > Personalização); "aco" é o padrão de fábrica
+  d.settings = { hourlyWageCents:0, aiModel:"rapido", colorTheme:"aco", ...(d.settings||{}) };
   if(!AI_MODELS[d.settings.aiModel]) d.settings.aiModel = "rapido";
+  if(!COLOR_THEME_MAP[d.settings.colorTheme]) d.settings.colorTheme = "aco";
   d.schemaVersion = SCHEMA_VERSION;
   return d;
 }
@@ -1195,6 +1204,35 @@ const QUALITATIVE = ["#F76B3C","#5A8DEE","#2FB98A","#E8B23C","#A57BE0","#E2564D"
 const CAT_COLOR = Object.fromEntries([...new Set(Object.values(CATS).flat().map(c=>c[0]))].map((n,i)=>[n,QUALITATIVE[i%QUALITATIVE.length]]));
 const CLASS_COLOR = Object.fromEntries(CLASSES.map((n,i)=>[n,QUALITATIVE[i%QUALITATIVE.length]]));
 const MONTH_NAMES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+/* paleta de acentos escolhíveis (Configurações > Personalização). Cada tema já vem com o par
+   claro/escuro validado (contraste mínimo garantido contra texto branco em botão sólido e contra
+   o fundo do próprio tema) — nenhuma combinação aqui deixa um botão com texto ilegível. "aco" é o
+   padrão de fábrica. As cores de status (ganho/gasto/investimento/aviso) e a paleta das categorias
+   nos gráficos (QUALITATIVE) nunca mudam com a escolha aqui — só o acento de marca muda. */
+const COLOR_THEMES = [
+  { id:"aco", name:"Aço", light:{accent:"#3E5266",deep:"#26323F"}, dark:{accent:"#5C7690",deep:"#3E5266"} },
+  { id:"grafite", name:"Grafite", light:{accent:"#4A4744",deep:"#2E2C2A"}, dark:{accent:"#857E77",deep:"#6B6762"} },
+  { id:"indigo", name:"Índigo", light:{accent:"#4338CA",deep:"#2D2A85"}, dark:{accent:"#7B77E0",deep:"#4F49C4"} },
+  { id:"marinho", name:"Azul-marinho", light:{accent:"#1E3A5F",deep:"#12233A"}, dark:{accent:"#5C87B8",deep:"#2E4F78"} },
+  { id:"cobalto", name:"Cobalto", light:{accent:"#2145A8",deep:"#152E6E"}, dark:{accent:"#5179E4",deep:"#4161C5"} },
+  { id:"petroleo", name:"Petróleo", light:{accent:"#0F5C56",deep:"#0A3E3A"}, dark:{accent:"#408B83",deep:"#24736B"} },
+  { id:"turquesa", name:"Turquesa", light:{accent:"#0E7C7B",deep:"#0A5453"}, dark:{accent:"#2F8C89",deep:"#21736F"} },
+  { id:"pinho", name:"Verde-pinho", light:{accent:"#3F6B4E",deep:"#294736"}, dark:{accent:"#578A68",deep:"#4A6F5D"} },
+  { id:"esmeralda", name:"Esmeralda", light:{accent:"#0F7A4E",deep:"#0A5236"}, dark:{accent:"#20905F",deep:"#19764B"} },
+  { id:"musgo", name:"Musgo", light:{accent:"#5C5A2E",deep:"#3D3B1E"}, dark:{accent:"#848144",deep:"#6C6A32"} },
+  { id:"ameixa", name:"Ameixa", light:{accent:"#6B3560",deep:"#472240"}, dark:{accent:"#B263A6",deep:"#8F5385"} },
+  { id:"violeta", name:"Violeta", light:{accent:"#5B3FA6",deep:"#3B296E"}, dark:{accent:"#8B6CD8",deep:"#6E57B9"} },
+  { id:"vinho", name:"Vinho", light:{accent:"#732940",deep:"#471624"}, dark:{accent:"#C06478",deep:"#833B4C"} },
+  { id:"rubi", name:"Rubi", light:{accent:"#8F2C40",deep:"#5C1826"}, dark:{accent:"#DA4E62",deep:"#B43E51"} },
+  { id:"terracota", name:"Terracota", light:{accent:"#AB4E2C",deep:"#78361C"}, dark:{accent:"#CA602E",deep:"#9A5630"} },
+  { id:"ambar", name:"Âmbar escuro", light:{accent:"#8A6318",deep:"#5C4110"}, dark:{accent:"#A47723",deep:"#826224"} },
+  { id:"bronze", name:"Bronze", light:{accent:"#705838",deep:"#47351E"}, dark:{accent:"#9D784A",deep:"#7C6348"} },
+  { id:"ferrugem", name:"Ferrugem", light:{accent:"#8F401F",deep:"#5C2612"}, dark:{accent:"#CD5E26",deep:"#9E532F"} },
+  { id:"chumbo", name:"Chumbo", light:{accent:"#524A42",deep:"#35302A"}, dark:{accent:"#8A7C71",deep:"#70665A"} },
+  { id:"ardosia", name:"Ardósia", light:{accent:"#48697F",deep:"#2E4152"}, dark:{accent:"#57849F",deep:"#506B7D"} },
+];
+const COLOR_THEME_MAP = Object.fromEntries(COLOR_THEMES.map(t=>[t.id,t]));
+
 const TAB_GROUPS = [
   { label:"Principal", items:[
     ["geral","Panorama","panorama"],
@@ -2183,9 +2221,14 @@ function App(){
   if(loadStatus==="erro") return <LoadErrorScreen message={loadError} onRetry={()=>setLoadNonce(n=>n+1)} onSignOut={sb?signOut:null}/>;
 
   const monthLabel=capFirst(view.toLocaleDateString("pt-BR",{month:"long",year:"numeric"}));
+  // cor de marca escolhida em Configurações > Personalização: sobrescreve --accent/--accent-deep
+  // via style inline (maior especificidade que a regra .rz/.rz.dark do CSS), sem duplicar toda a
+  // paleta — só o acento muda, o resto dos tokens do tema continua vindo do CSS normalmente
+  const colorTheme = COLOR_THEME_MAP[settings?.colorTheme] || COLOR_THEME_MAP.aco;
+  const themeVars = theme==="dark" ? colorTheme.dark : colorTheme.light;
 
   return (
-    <div className={"rz "+theme}>
+    <div className={"rz "+theme} style={{"--accent":themeVars.accent,"--accent-deep":themeVars.deep}}>
       <div className={"topbar"+(scrolled?" scrolled":"")}>
         <div className="topbar-in">
           <div className="brandmark">
@@ -2312,6 +2355,22 @@ function App(){
             <button key={k} className={(settings?.aiModel||"rapido")===k?"on in":""} onClick={()=>update(d=>({settings:{...d.settings,aiModel:k}}))}>{m.label}</button>)}
         </div>
         <div className="hint">{AI_MODELS[settings?.aiModel||"rapido"].hint} Se um documento vier bagunçado ou com muitas linhas erradas, troque para "Cuidadoso" e mande de novo só aquele arquivo.</div>
+        <div className="sheetdivider"/>
+        <div className="sub" style={{marginBottom:8}}>Cor de marca do site</div>
+        <div className="colorgrid">
+          {COLOR_THEMES.map(t=>{
+            const active=(settings?.colorTheme||"aco")===t.id;
+            const swatch = theme==="dark" ? t.dark.accent : t.light.accent;
+            return (
+              <button key={t.id} type="button" className={"colorswatch"+(active?" on":"")}
+                style={{"--sw":swatch}} title={t.name} aria-label={"Usar cor "+t.name} aria-pressed={active}
+                onClick={()=>update(d=>({settings:{...d.settings,colorTheme:t.id}}))}>
+                {active && <Icon name="check" size={14}/>}
+              </button>
+            );
+          })}
+        </div>
+        <div className="hint">{COLOR_THEME_MAP[settings?.colorTheme||"aco"].name} — usada em botões, navegação ativa e destaques. As cores de ganho, gasto, investimento e aviso não mudam com a escolha aqui.</div>
         <div className="sheetdivider"/>
         <div className="kv"><span className="kk">Versão do app</span><span className="vv">{APP_VERSION}</span></div>
         <div className="kv"><span className="kk">Atualizado em</span><span className="vv">{fmtDateBR(APP_BUILD)}</span></div>
