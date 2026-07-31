@@ -445,6 +445,7 @@ body{background:#08090D}
 .rz .badge.extrato{background:var(--pos-bg);color:var(--pos);border-color:transparent}
 .rz .badge.fatura{background:var(--inv-bg);color:var(--inv);border-color:transparent}
 .rz .badge.recibo{background:var(--warn-bg);color:var(--warn);border-color:transparent}
+.rz .badge.nota_corretagem{background:var(--trf-bg);color:var(--trf);border-color:transparent}
 .rz .itemrow{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--surface-2)}
 .rz .itemrow:last-child{border-bottom:none}
 .rz .itemrow.off{opacity:.45}
@@ -452,6 +453,23 @@ body{background:#08090D}
 .rz .itemsummary{display:flex;align-items:center;gap:10px;width:100%;border:none;background:transparent;padding:4px 0 0;margin:0;text-align:left;cursor:pointer;font-size:12px;color:var(--text-mut);line-height:1.5;min-height:30px}
 .rz .itemsummary span{flex:1;min-width:0;overflow-wrap:anywhere}
 .rz .itemsummary b{flex:0 0 auto;color:var(--accent);font-weight:600}
+.rz .massbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:11px 13px;margin-bottom:12px;
+  border:1px solid var(--accent);border-radius:11px;background:color-mix(in srgb, var(--accent) 14%, var(--surface));
+  position:sticky;top:64px;z-index:3;box-shadow:var(--shadow-card)}
+@media (min-width:1024px){.rz .massbar{top:88px}}
+.rz .massbar .masslabel{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--accent)}
+.rz .massbar .fld{width:auto;min-width:150px;padding:7px 10px;font-size:13px;background:var(--surface)}
+.rz .ativosnota{border:1px solid var(--hairline);border-radius:11px;padding:12px 13px;margin-bottom:12px;background:var(--bg)}
+.rz .ativosnota .ativoshead{margin-bottom:8px}
+.rz .ativosnota .ativoshead b{font-size:13px;display:block}
+.rz .ativosnota .ativoshead span{font-size:12px;color:var(--text-mut)}
+.rz .ativorow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--surface-2);font-size:13px;cursor:pointer}
+.rz .ativorow:last-of-type{border-bottom:none}
+.rz .ativorow input{width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto;cursor:pointer}
+.rz .ativorow .an{flex:1;min-width:0}
+.rz .ativorow .aq,.rz .ativorow .acls{font-size:11.5px;color:var(--text-mut);white-space:nowrap}
+.rz .ativorow .av{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:500}
+@media (max-width:560px){.rz .ativorow .aq,.rz .ativorow .acls{display:none}}
 @media (prefers-reduced-motion:reduce){
   .rz .aiorb .core,.rz .aiorb i,.rz .aibar>span,.rz .docrow .dspin,.rz .aidots::after{animation:none!important}
   .rz .aibar>i{transition:none}
@@ -557,8 +575,8 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.6";
-const APP_BUILD = "2026-07-26";
+const APP_VERSION = "1.2.9";
+const APP_BUILD = "2026-07-31";
 
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -640,6 +658,30 @@ const aiModelId = (key)=>(AI_MODELS[key]||AI_MODELS.rapido).id;
    pagamento de fatura e transferência entre bancos viram o MESMO type ("transferencia") no final, só que
    com contas de origem/destino diferentes — a distinção importa para montar o par certo. */
 const AI_NATUREZAS = ["gasto","ganho","investimento","pagamento_fatura","transferencia_saida","transferencia_entrada","estorno","ignorar"];
+const AI_DOC_TIPOS = ["extrato","fatura","nota_corretagem","recibo","outro"];
+
+/* ---- impressão digital do documento ----
+   O nome do banco no PDF nem sempre bate com o apelido que a pessoa deu à conta ("Nubank Conta" x
+   "NU PAGAMENTOS S.A."), e um mesmo banco pode ter conta e cartão. Números não têm esse problema: o
+   número da conta e o final do cartão identificam sem ambiguidade. Ao confirmar uma importação, esses
+   números ficam guardados na conta (settings de cada conta, campo matchKeys) e passam a casar sozinhos
+   nos meses seguintes — sem depender da IA acertar o apelido. */
+const fpNorm = (s)=>String(s||"").replace(/[^0-9a-zA-Z]/g,"").toLowerCase();
+function docFingerprints(identificacao){
+  const keys=[];
+  const conta=fpNorm(identificacao?.conta);
+  if(conta.length>=5) keys.push("conta:"+conta);
+  (identificacao?.finaisCartao||[]).forEach(c=>{
+    const n=fpNorm(c);
+    if(n.length>=4) keys.push("cartao:"+n.slice(-4));
+  });
+  return [...new Set(keys)];
+}
+/* conta cadastrada cuja impressão digital bate com a do documento (casamento determinístico, sem IA) */
+function accountByFingerprint(keys, accounts){
+  if(!keys.length) return null;
+  return accounts.find(a=>(a.matchKeys||[]).some(k=>keys.includes(k))) || null;
+}
 
 /* descreve as contas cadastradas para a IA: é o que permite casar o documento com o banco certo
    ("fatura do Nubank" → o cartão Nubank) e apontar a contraparte de transferências e pagamentos. */
@@ -648,62 +690,89 @@ function accountsForPrompt(accounts){
     const o = { id:a.id, nome:a.name, tipo: a.kind==="cartao" ? "cartão de crédito" : "conta bancária" };
     if(a.kind==="cartao" && a.closingDay) o.diaFechamento = a.closingDay;
     if(a.kind==="cartao" && a.dueDay) o.diaVencimento = a.dueDay;
+    // números já aprendidos de importações anteriores — a pista mais confiável que a IA pode ter
+    const nums=(a.matchKeys||[]).map(k=>k.startsWith("cartao:")?("cartão final "+k.slice(7)):("conta nº "+k.slice(6)));
+    if(nums.length) o.numerosConhecidos = nums;
     return o;
   });
 }
 
-/* Lê um documento inteiro (extrato em PDF, fatura de cartão em PDF ou foto de recibo) e devolve
-   {documento, lancamentos} já classificados. É o coração do "open finance manual": a IA primeiro decide
-   QUE documento é aquele e de QUAL conta cadastrada ele é, depois classifica linha por linha. */
+/* Lê um documento inteiro (extrato, fatura de cartão, nota de corretagem, recibo — em PDF, foto ou print
+   de tela) e devolve {documento, lancamentos, ativos} já classificados. É o coração do "open finance
+   manual": a IA primeiro decide QUE documento é aquele e de QUAL conta cadastrada ele é, depois
+   classifica linha por linha. */
 async function analyzeDocumentWithAI({ base64, mimeType, fileName, accounts, model }){
   const categoryList = Object.entries(CATS).map(([t,cats])=>`- ${t}: ${cats.map(c=>c[0]).join(", ")}`).join("\n");
-  const prompt = `Você é um analista financeiro brasileiro, meticuloso, que lê documentos bancários em PDF ou foto e transforma cada linha em um lançamento estruturado. Leia o documento INTEIRO com atenção — todas as páginas — antes de responder. Nome do arquivo: "${fileName||"documento"}". Data de hoje: ${todayISO()}.
-
+  const ehImagem = /^image\//.test(mimeType||"");
+  const prompt = `Você é um analista financeiro brasileiro, meticuloso, que lê documentos bancários e os transforma em lançamentos estruturados. Leia o documento INTEIRO com atenção — todas as páginas — antes de responder. Nome do arquivo: "${fileName||"documento"}". Data de hoje: ${todayISO()}.
+${ehImagem?`
+ESTE ARQUIVO É UMA IMAGEM (foto ou print de tela). Pode ser um print do extrato/fatura dentro do app do banco, uma foto de uma nota de corretagem impressa, ou um cupom fiscal. NÃO assuma que é um recibo de compra única: trate pelo conteúdo, exatamente como faria com um PDF, e extraia TODAS as linhas de lançamento que estiverem visíveis na imagem.
+`:""}
 CONTAS JÁ CADASTRADAS PELO USUÁRIO (use exatamente estes ids):
 ${JSON.stringify(accountsForPrompt(accounts), null, 1)}
 
 PASSO 1 — Identifique o documento (campo "documento"):
 - tipo:
-  · "extrato" = movimentação de uma CONTA bancária (saldo, PIX, TED, débitos, créditos, salário).
-  · "fatura" = fatura de CARTÃO DE CRÉDITO (compras do período, parcelas, "total desta fatura", vencimento, limite).
-  · "recibo" = cupom fiscal, nota ou comprovante de uma compra única.
+  · "extrato" = movimentação de uma CONTA bancária (saldo, PIX, TED, débitos, créditos, salário, rendimentos).
+  · "fatura" = fatura de CARTÃO DE CRÉDITO (compras do período, parcelas, "total a pagar", vencimento, limite, pagamento mínimo).
+  · "nota_corretagem" = nota de corretagem / nota de negociação da bolsa (tem "NOTA DE CORRETAGEM", "Data pregão", "Negócios realizados", "Resumo financeiro", "Líquido para", corretora tipo Inter DTVM, XP, Rico, Clear, NuInvest, BTG).
+  · "recibo" = cupom fiscal, nota fiscal ou comprovante de UMA compra única.
   · "outro" = qualquer outra coisa.
-  Sinais de fatura: existe "vencimento", "total desta fatura", "limite", "compras parceladas", "pagamento recebido". Sinais de extrato: existe "saldo anterior"/"saldo do dia"/"saldo final" e a coluna de saldo acumulado.
 - banco: nome da instituição (ex: Nubank, Itaú, Bradesco, Inter, C6 Bank, BTG, Caixa, Banco do Brasil, Santander, Mercado Pago, PicPay, XP).
+- identificacao: os números que identificam de onde o documento veio. É o campo MAIS IMPORTANTE para acertar a conta — preencha com cuidado:
+  · agencia: número da agência, como aparece ("0001", "1", "00019"). Se não houver, "".
+  · conta: número da conta com dígito, como aparece ("28942447-5", "13995672424", "5790299-2"). Se não houver, "".
+  · finaisCartao: lista com os ÚLTIMOS 4 DÍGITOS de cada cartão citado no documento (uma fatura costuma listar vários: titular e adicionais). Ex: ["5909","1065"]. Se não houver, [].
+  · cpfTitular: o CPF do titular do documento, como aparece — inclusive mascarado ("•••.311.687-••", "174.311.687-05"). Se não houver, "".
+  · nomeTitular: nome completo do titular, como aparece no cabeçalho. Se não houver, "".
 - contaId: o id da conta cadastrada que ESTE documento representa. Regras rígidas:
   · documento "fatura" só pode casar com uma conta de tipo "cartão de crédito";
-  · documento "extrato" só pode casar com uma conta de tipo "conta bancária";
-  · case pelo nome do banco/apelido; se nenhuma conta cadastrada servir, devolva "" (string vazia) — não invente id.
+  · documento "extrato" e "nota_corretagem" só podem casar com uma "conta bancária";
+  · se alguma conta cadastrada tiver "numerosConhecidos" que batem com a identificacao acima, use ESSA — é a pista mais forte que existe;
+  · senão case pelo nome do banco/apelido; se nenhuma servir, devolva "" (string vazia) — não invente id.
 - periodoInicio / periodoFim: primeiro e último dia cobertos pelo documento, em AAAA-MM-DD.
-- vencimento: só para fatura, a data de vencimento em AAAA-MM-DD (senão "").
-- totalDocumento: para fatura, o "total desta fatura" em reais; para extrato, 0.
+- vencimento: para fatura, a data de vencimento; para nota de corretagem, a data de liquidação ("Líquido para"). Senão "".
+- totalDocumento: para fatura, o "total a pagar"; para nota de corretagem, o valor "Líquido para"; para extrato, 0.
 - confianca: 0 a 1, o quanto você tem certeza dessa identificação.
 - observacao: uma frase curta em português explicando como você identificou o documento e a conta.
 
 PASSO 2 — Extraia TODOS os lançamentos individuais, na ordem em que aparecem, sem pular nenhum e sem inventar nenhum. Para cada um:
-- data: AAAA-MM-DD. Se a linha só tiver dia/mês, complete com o ano do período do documento (cuidado com a virada de ano em dezembro/janeiro).
-- descricao: curta e limpa, sem códigos internos do banco, mas preservando o nome do estabelecimento ou da pessoa.
+- data: AAAA-MM-DD. Se a linha só tiver dia/mês, complete com o ano do período do documento. ATENÇÃO à virada de ano: numa fatura que cobre "26 DEZ a 27 JAN", as linhas de dezembro são do ano anterior às de janeiro.
+- descricao: curta e limpa, sem códigos internos do banco nem número de operação, mas preservando o nome do estabelecimento ou da pessoa.
 - valor: número POSITIVO em reais (ex: 150.5). O sinal nunca vai aqui — quem diz se entra ou sai é a "natureza".
 - natureza, escolhida com muito critério:
-  · "gasto" — despesa de verdade: compra, débito, tarifa, juros, IOF, anuidade, boleto pago, saque. Em uma FATURA, toda compra do período é "gasto".
-  · "ganho" — entrada de verdade: salário, PIX/TED recebido de terceiros, rendimento, cashback creditado, restituição.
-  · "investimento" — aplicação/aporte (CDB, tesouro, fundo, previdência, compra de ações, resgate NÃO conta aqui).
-  · "pagamento_fatura" — pagamento da fatura do cartão de crédito. Em um EXTRATO aparece como "PAGAMENTO CARTAO", "PAGTO FATURA", "DEB AUT CARTAO", "PAGAMENTO DE FATURA". Em uma FATURA aparece como "PAGAMENTO RECEBIDO", "PAGAMENTO EFETUADO", "PGTO DEBITO AUTOMATICO" (normalmente na primeira linha, com sinal de crédito). ISSO NÃO É GASTO: é dinheiro saindo da conta e quitando o cartão. Nunca classifique como gasto.
-  · "transferencia_saida" — dinheiro saindo desta conta para OUTRA CONTA DO PRÓPRIO USUÁRIO (transferência entre bancos, PIX para si mesmo, aplicação em conta do mesmo titular em outro banco, "transferência entre contas"). Só use quando a descrição indicar mesmo titular / conta própria / outro banco do usuário. PIX para terceiros é "gasto".
-  · "transferencia_entrada" — o mesmo, mas entrando nesta conta vinda de outra conta do próprio usuário.
+  · "gasto" — despesa de verdade: compra, débito, tarifa, juros, IOF, anuidade, boleto pago, saque, emolumentos e taxas de corretagem. Em uma FATURA, toda compra do período é "gasto".
+  · "ganho" — entrada de verdade: salário, PIX/TED recebido de TERCEIROS, rendimento/remuneração do saldo, cashback creditado, restituição, dividendos.
+  · "investimento" — aplicação/aporte: CDB, tesouro, fundo, previdência, e cada COMPRA de ativo numa nota de corretagem. Resgate/venda NÃO é investimento (venda de ativo é "ganho").
+  · "pagamento_fatura" — pagamento da fatura de um cartão de crédito. Num EXTRATO aparece como "PAGAMENTO CARTAO", "PAGTO FATURA", "DEB AUT CARTAO", "Pagamento de fatura", "Pagamento Cartão de crédito", ou como um Pix/QR pago a uma instituição que emite cartão ("NU PAGAMENTOS", "MERCADOPAGO", "BANCO INTER") quando o valor bate com uma fatura. Numa FATURA aparece como "PAGAMENTO RECEBIDO", "Pagamento recebido", "Pagamento da fatura de <mês>". ISSO NÃO É GASTO: é dinheiro saindo da conta e quitando o cartão.
+  · "transferencia_saida" — dinheiro saindo desta conta para OUTRA CONTA DO PRÓPRIO USUÁRIO.
+  · "transferencia_entrada" — o mesmo, mas entrando nesta conta.
   · "estorno" — estorno, devolução, cancelamento de compra, crédito de ajuste.
-  · "ignorar" — tudo que NÃO é um lançamento: saldo anterior, saldo do dia, saldo final, saldo disponível, limite, total da fatura, subtotais, totais por categoria, cabeçalho, rodapé, número de página, avisos, propaganda, "saldo em conta", "rendimento do dia" quando é só informativo do saldo.
+  · "ignorar" — tudo que NÃO é um lançamento individual: saldo inicial/anterior/do dia/final, saldo disponível, limite, "total de entradas", "total de saídas", "total a pagar", "total desta fatura", subtotais, "Resumo dos negócios", "Resumo financeiro", "Líquido para", cabeçalho, rodapé, número de página, avisos, propaganda, opções de parcelamento da fatura, simulações de juros.
+
+COMO RECONHECER TRANSFERÊNCIA ENTRE CONTAS PRÓPRIAS (regra decisiva):
+O documento diz no cabeçalho quem é o titular (nomeTitular/cpfTitular). Uma linha de Pix/TED é transferência entre contas do PRÓPRIO usuário quando o nome OU o CPF da contraparte é o MESMO do titular do documento — mesmo que o banco de destino seja outro. Compare ignorando maiúsculas/acentos, e aceite CPF mascarado (se "•••.311.687-••" bate com o titular, é a mesma pessoa). Exemplo: extrato de titular "Luís Gustavo Curty de Souza Azevedo" com a linha "Transferência enviada pelo Pix — Luis Gustavo Curty de Souza Azevedo — BANCO INTER" é "transferencia_saida", NÃO é gasto. Já Pix para qualquer outro nome/CPF é "gasto" (ou "ganho", se estiver entrando).
+
 - categoria: escolha EXATAMENTE uma das opções abaixo, compatível com a natureza (para "gasto" use a lista de gasto; "ganho" e "estorno" usam a lista de ganho; "investimento" usa a lista de investimento; para pagamento_fatura e transferências use "").
 ${categoryList}
+  Dica para nota de corretagem: FII/fundo imobiliário → "Fundos"; ação/unit/BDR → "Ações"; tesouro direto → "Tesouro"; CDB/LCI/LCA/debênture → "Renda Fixa"; cripto → "Cripto".
 - contraparteId: quando a natureza for "pagamento_fatura" ou uma transferência, o id da OUTRA conta cadastrada envolvida (ex: num extrato, o pagamento da fatura do cartão Nubank aponta para o id do cartão Nubank). Se não der para identificar, "".
-- parcelaAtual / parcelaTotal: se a linha indicar parcelamento ("03/10", "PARC 3 DE 10"), preencha os dois números; senão 0.
+- parcelaAtual / parcelaTotal: se a linha indicar parcelamento ("Parcela 3/6", "Parcela 1 de 4", "03/10"), preencha os dois números; senão 0.
 - confianca: 0 a 1.
+
+PASSO 3 — Só para "nota_corretagem", preencha também "ativos" (senão devolva lista vazia), um item por linha de "Negócios realizados":
+- ticker: o código do papel quando der para identificar (ex: "BTLG11", "KLBN11"); senão "".
+- nome: a especificação como aparece na nota (ex: "FII BTLG", "KLABIN S/A").
+- classe: uma de "Renda Fixa", "Renda Variável", "Fundos", "Cripto", "Tesouro", "Previdência", "Outros". FII → "Fundos"; ação/unit → "Renda Variável".
+- operacao: "compra" ou "venda" (a coluna C/V).
+- quantidade, precoUnitario, valorTotal: números.
 
 REGRAS FINAIS:
 - Nunca some linhas nem crie um lançamento "total".
-- Em uma fatura, a soma dos "gasto" deve bater aproximadamente com o total da fatura menos os pagamentos e estornos.
+- Numa nota de corretagem: cada compra de ativo vira um lançamento "investimento" separado, e as taxas (liquidação, registro, emolumentos, corretagem, transferência de ativos, ISS) viram UM único lançamento "gasto" com a soma delas, descrição "Taxas e emolumentos". A data de TODOS os lançamentos da nota é a data de liquidação ("Líquido para"), porque é nela que o dinheiro sai da conta — não a data do pregão.
+- Numa fatura, a soma dos "gasto" deve bater aproximadamente com o total de compras do período.
 - Se o documento for um recibo, devolva um único lançamento de natureza "gasto".
-- Se não conseguir ler nada, devolva a lista vazia em vez de inventar.`;
+- Se não conseguir ler nada, devolva as listas vazias em vez de inventar.`;
 
   const schema = {
     type: "OBJECT",
@@ -711,9 +780,19 @@ REGRAS FINAIS:
       documento: {
         type: "OBJECT",
         properties: {
-          tipo: { type:"STRING", enum:["extrato","fatura","recibo","outro"] },
+          tipo: { type:"STRING", enum: AI_DOC_TIPOS },
           banco: { type:"STRING" },
           contaId: { type:"STRING" },
+          identificacao: {
+            type: "OBJECT",
+            properties: {
+              agencia: { type:"STRING" },
+              conta: { type:"STRING" },
+              finaisCartao: { type:"ARRAY", items:{ type:"STRING" } },
+              cpfTitular: { type:"STRING" },
+              nomeTitular: { type:"STRING" },
+            },
+          },
           periodoInicio: { type:"STRING" },
           periodoFim: { type:"STRING" },
           vencimento: { type:"STRING" },
@@ -741,6 +820,22 @@ REGRAS FINAIS:
           required: ["data","descricao","valor","natureza"],
         },
       },
+      ativos: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            ticker: { type:"STRING" },
+            nome: { type:"STRING" },
+            classe: { type:"STRING" },
+            operacao: { type:"STRING", enum:["compra","venda"] },
+            quantidade: { type:"NUMBER" },
+            precoUnitario: { type:"NUMBER" },
+            valorTotal: { type:"NUMBER" },
+          },
+          required: ["nome","valorTotal"],
+        },
+      },
     },
     required: ["documento","lancamentos"],
   };
@@ -755,23 +850,31 @@ REGRAS FINAIS:
   return {
     documento: parsed.documento || {},
     lancamentos: Array.isArray(parsed.lancamentos) ? parsed.lancamentos : [],
+    ativos: Array.isArray(parsed.ativos) ? parsed.ativos : [],
   };
 }
 
-/* escolhe a conta que o documento representa: a que a IA apontou, se ela existir e for do tipo coerente
-   (fatura↔cartão, extrato↔conta); senão a primeira conta cadastrada do tipo certo; senão "" (o usuário escolhe). */
+/* escolhe a conta que o documento representa, em ordem de confiabilidade:
+   1) impressão digital (número de conta/cartão já aprendido de uma importação anterior) — não depende da IA;
+   2) o id que a IA apontou, se existir e for do tipo coerente (fatura↔cartão, extrato/nota↔conta);
+   3) a primeira conta cadastrada do tipo certo, como chute;
+   4) "" — a pessoa escolhe na mão. */
 function resolveDocAccount(documento, accounts){
-  const wanted = documento.tipo==="fatura" ? "cartao" : documento.tipo==="extrato" ? "conta" : null;
+  const wanted = documento.tipo==="fatura" ? "cartao"
+    : (documento.tipo==="extrato"||documento.tipo==="nota_corretagem") ? "conta" : null;
+  const keys = docFingerprints(documento.identificacao);
+  const byFp = accountByFingerprint(keys, accounts);
+  if(byFp && (!wanted || byFp.kind===wanted)) return { id:byFp.id, auto:true, via:"numero" };
   const guessed = accounts.find(a=>a.id===documento.contaId);
-  if(guessed && (!wanted || guessed.kind===wanted)) return { id:guessed.id, auto:true };
+  if(guessed && (!wanted || guessed.kind===wanted)) return { id:guessed.id, auto:true, via:"ia" };
   const fallback = wanted ? accounts.find(a=>a.kind===wanted) : accounts[0];
-  return { id: fallback ? fallback.id : "", auto:false };
+  return { id: fallback ? fallback.id : "", auto:false, via:"chute" };
 }
 
 /* converte a resposta da IA para as linhas da tela de revisão.
    Aqui é onde "pagamento de fatura" e "transferência entre bancos" viram um lançamento de transferência
    com origem e destino — o resto do app já sabe lidar com esse par (não entra em Entradas/Saídas, só move saldo). */
-function mapAiDocument({ documento, lancamentos }, accounts, docId){
+function mapAiDocument({ documento, lancamentos, ativos }, accounts, docId){
   const docAcct = resolveDocAccount(documento||{}, accounts);
   const isCard = accounts.find(a=>a.id===docAcct.id)?.kind==="cartao";
   const rows = [];
@@ -814,19 +917,44 @@ function mapAiDocument({ documento, lancamentos }, accounts, docId){
     });
   });
   const meta = {
-    tipo: ["extrato","fatura","recibo","outro"].includes(documento?.tipo) ? documento.tipo : "outro",
+    tipo: AI_DOC_TIPOS.includes(documento?.tipo) ? documento.tipo : "outro",
     banco: String(documento?.banco||"").trim(),
     contaId: docAcct.id,
     contaAuto: docAcct.auto,
+    contaVia: docAcct.via,
+    fingerprints: docFingerprints(documento?.identificacao),
+    titular: String(documento?.identificacao?.nomeTitular||"").trim(),
     periodoInicio: /^\d{4}-\d{2}-\d{2}$/.test(documento?.periodoInicio||"") ? documento.periodoInicio : "",
     periodoFim: /^\d{4}-\d{2}-\d{2}$/.test(documento?.periodoFim||"") ? documento.periodoFim : "",
     vencimento: /^\d{4}-\d{2}-\d{2}$/.test(documento?.vencimento||"") ? documento.vencimento : "",
     totalDocumento: Math.max(0, Math.round((Number(documento?.totalDocumento)||0)*100)),
     confianca: typeof documento?.confianca==="number" ? documento.confianca : null,
     observacao: String(documento?.observacao||"").trim(),
+    ativos: sanitizeAtivos(ativos),
     fonte: "ia",
   };
   return { meta, rows };
+}
+
+/* valida os ativos vindos de uma nota de corretagem, para poderem virar itens da carteira */
+function sanitizeAtivos(ativos){
+  return (ativos||[]).map(a=>{
+    const valor = Math.max(0, Math.round((Number(a.valorTotal)||0)*100));
+    if(valor<=0) return null;
+    const nome = String(a.nome||"").trim();
+    if(!nome) return null;
+    const ticker = String(a.ticker||"").trim().toUpperCase();
+    return {
+      id: uid(),
+      ticker,
+      nome: ticker && !nome.toUpperCase().includes(ticker) ? `${nome} (${ticker})` : nome,
+      cls: CLASSES.includes(a.classe) ? a.classe : "Outros",
+      operacao: a.operacao==="venda" ? "venda" : "compra",
+      quantidade: Math.max(0, Number(a.quantidade)||0),
+      cents: valor,
+      selected: a.operacao!=="venda", // venda não vira aporte na carteira; entra desmarcada
+    };
+  }).filter(Boolean);
 }
 
 /* leitura de fallback, sem IA: usa o pdf.js local + o parser por regex. Só reconhece gasto/ganho —
@@ -1106,7 +1234,9 @@ function migrate(data){
   // 2.3 — previsto × realizado: lançamentos antigos, sem o campo, sempre foram tratados como já ocorridos
   d.transactions = (d.transactions||[]).map(t=>({ status:"realizado", ...t }));
   // 2.2 — saldo inicial por conta
-  d.accounts = (d.accounts||[]).map(a=>({ openingBalance:0, openingDate:"", ...a }));
+  // 4.3 — matchKeys: números de conta/cartão aprendidos ao importar documentos, usados para casar
+  // documento↔conta sozinho nas próximas importações (ver docFingerprints/resolveDocAccount)
+  d.accounts = (d.accounts||[]).map(a=>({ openingBalance:0, openingDate:"", matchKeys:[], ...a }));
   // 3.0 — memória de categorização, histórico de patrimônio e recaps automáticos (Fase 5)
   d.categoryMemory = d.categoryMemory || {};
   d.patrimonyHistory = d.patrimonyHistory || {};
@@ -4386,11 +4516,60 @@ const DOC_PHASES = {
   pronto:     { label:"Pronto",                   weight:1    },
   erro:       { label:"Falhou",                   weight:1    },
 };
-const DOC_TIPO_LABEL = { extrato:"Extrato", fatura:"Fatura", recibo:"Recibo", outro:"Documento" };
+const DOC_TIPO_LABEL = { extrato:"Extrato", fatura:"Fatura", nota_corretagem:"Nota de corretagem", recibo:"Recibo", outro:"Documento" };
 const MAX_DOC_BYTES = 3 * 1024 * 1024;
 const VALOR_COR = { gasto:"var(--neg)", ganho:"var(--pos)", investimento:"var(--inv)", transferencia:"var(--trf)" };
 const daysApart = (a,b)=>Math.abs((new Date(a+"T00:00:00")-new Date(b+"T00:00:00"))/86400000);
 const normDesc = (s)=>String(s||"").trim().toLowerCase().replace(/\s+/g," ");
+
+/* ativos lidos de uma nota de corretagem: além de virarem lançamentos de investimento (o dinheiro que
+   saiu da conta), eles podem entrar na carteira em Investimentos. Aqui a pessoa escolhe quais quer levar
+   para lá — ativo que já existe na carteira tem o aporte somado em vez de duplicar a linha. */
+function AtivosDaNota({ doc, update, onDone }){
+  const [sel,setSel]=useState(()=>new Set((doc.meta.ativos||[]).filter(a=>a.selected).map(a=>a.id)));
+  const ativos=doc.meta.ativos||[];
+  const escolhidos=ativos.filter(a=>sel.has(a.id));
+  const toggle=(id)=>setSel(s=>{ const n=new Set(s); n.has(id)?n.delete(id):n.add(id); return n; });
+  function adicionar(){
+    if(!escolhidos.length) return;
+    update(d=>{
+      const holdings=[...(d.holdings||[])];
+      escolhidos.forEach(a=>{
+        // casa por ticker quando houver, senão pelo nome — evita criar "BTLG11" duas vezes
+        const chave=(a.ticker||a.nome).toLowerCase();
+        const i=holdings.findIndex(h=>(h.name||"").toLowerCase().includes(chave));
+        if(i>=0) holdings[i]={ ...holdings[i], invested:holdings[i].invested+a.cents, current:holdings[i].current+a.cents };
+        else holdings.push({ id:uid(), name:a.nome, cls:a.cls, invested:a.cents, current:a.cents });
+      });
+      return { holdings };
+    });
+    toast(`${escolhidos.length} ativo${escolhidos.length===1?"":"s"} na carteira.`,"success");
+    onDone && onDone();
+  }
+  return (
+    <div className="ativosnota">
+      <div className="ativoshead">
+        <b>{ativos.length} ativo{ativos.length===1?"":"s"} nesta nota</b>
+        <span>Some na sua carteira em Investimentos, além de entrar como aporte no extrato.</span>
+      </div>
+      {ativos.map(a=>(
+        <label className="ativorow" key={a.id}>
+          <input type="checkbox" checked={sel.has(a.id)} onChange={()=>toggle(a.id)}/>
+          <span className="an">{a.nome}{a.operacao==="venda" && <span className="tag warn" style={{marginLeft:6}}>venda</span>}</span>
+          <span className="aq">{a.quantidade>0?`${a.quantidade} × ${brl(Math.round(a.cents/a.quantidade))}`:""}</span>
+          <span className="acls">{a.cls}</span>
+          <span className="av num">{brl(a.cents)}</span>
+        </label>
+      ))}
+      <div style={{display:"flex",gap:8,marginTop:10,flexWrap:"wrap"}}>
+        <button className="sbtn primary" disabled={!escolhidos.length} onClick={adicionar}>
+          <Icon name="investimentos" size={14}/> Adicionar {escolhidos.length} à carteira
+        </button>
+        <button className="sbtn" onClick={onDone}>Agora não</button>
+      </div>
+    </div>
+  );
+}
 
 function Extrato({ accounts, update, txs, aiModel }){
   const [docs,setDocs]=useState([]);      // um por arquivo enviado, com status e progresso próprios
@@ -4581,10 +4760,50 @@ function Extrato({ accounts, update, txs, aiModel }){
     // descrição aparecer (na mão ou noutro extrato), a categoria já vem sugerida sem custar chamada de IA
     const memoria={};
     lista.forEach(it=>{ if(it.type!=="transferencia" && it.desc.trim()) memoria[it.desc.trim().toLowerCase()]=it.category; });
-    update(d=>({ transactions:[...entries,...d.transactions], categoryMemory:{...(d.categoryMemory||{}),...memoria} }));
+    // aprende a impressão digital: o número de conta/cartão do documento fica guardado na conta que a
+    // pessoa confirmou, e no mês que vem o mesmo banco casa sozinho, sem depender do apelido bater
+    const aprendidos={};
+    new Set(lista.map(it=>it.docId)).forEach(docId=>{
+      const doc=docs.find(d=>d.id===docId);
+      const conta=doc?.meta?.contaId, keys=doc?.meta?.fingerprints||[];
+      if(!conta || !keys.length) return;
+      aprendidos[conta]=[...(aprendidos[conta]||[]),...keys];
+    });
+    update(d=>({
+      transactions:[...entries,...d.transactions],
+      categoryMemory:{...(d.categoryMemory||{}),...memoria},
+      accounts: Object.keys(aprendidos).length
+        ? d.accounts.map(a=>aprendidos[a.id] ? { ...a, matchKeys:[...new Set([...(a.matchKeys||[]),...aprendidos[a.id]])] } : a)
+        : d.accounts,
+    }));
     const ids=new Set(lista.map(it=>it.id));
     setItems(its=>its.filter(it=>!ids.has(it.id)));
     toast(`${entries.length} lançamento${entries.length===1?"":"s"} importado${entries.length===1?"":"s"}.`,"success");
+  }
+
+  /* ---- ações em massa ----
+     Sem isso, um extrato em que a IA não reconheceu a conta obriga a pessoa a abrir item por item e
+     escolher a mesma conta dezenas de vezes. Aqui aplica de uma vez em tudo que está marcado,
+     atravessando documentos diferentes. */
+  const marcados=items.filter(it=>it.selected);
+  function aplicarEmMassa(patch){
+    const ids=new Set(marcados.map(it=>it.id));
+    if(!ids.size) return;
+    setItems(its=>its.map(it=>ids.has(it.id)?{...it,...patch(it)}:it));
+  }
+  function massaConta(acctId){
+    if(!acctId) return;
+    // em transferência, "a conta do lançamento" é a origem; o destino continua como está
+    aplicarEmMassa(()=>({ acctId }));
+    toast(`Conta aplicada a ${marcados.length} lançamento${marcados.length===1?"":"s"}.`,"success");
+  }
+  function massaCategoria(cat){
+    if(!cat) return;
+    const alvo=marcados.filter(it=>it.type!=="transferencia" && CATS[it.type].some(c=>c[0]===cat));
+    if(!alvo.length){ toast("Nenhum item marcado aceita essa categoria.","error"); return; }
+    const ids=new Set(alvo.map(it=>it.id));
+    setItems(its=>its.map(it=>ids.has(it.id)?{...it,category:cat}:it));
+    toast(`Categoria aplicada a ${alvo.length} lançamento${alvo.length===1?"":"s"}.`,"success");
   }
 
   const docsComItens=docs.filter(d=>items.some(it=>it.docId===d.id));
@@ -4597,7 +4816,7 @@ function Extrato({ accounts, update, txs, aiModel }){
     <React.Fragment>
     <div className="card">
       <h3>Importar do banco <HelpIcon section="extrato-ajuda"/></h3>
-      <div className="sub">Jogue aqui todos os PDFs do mês — extratos das contas e faturas dos cartões, de uma vez. A IA descobre de qual banco é cada documento, se é extrato ou fatura, e separa gasto, entrada, investimento, pagamento de fatura e transferência entre os seus bancos. Nada entra no app antes de você revisar.</div>
+      <div className="sub">Jogue aqui tudo do mês de uma vez — extratos, faturas de cartão, notas de corretagem, recibos. Vale PDF, foto ou print de tela do app do banco. A IA descobre de qual banco é cada documento e separa gasto, entrada, investimento, pagamento de fatura e transferência entre os seus bancos. Nada entra no app antes de você revisar.</div>
 
       {contasGenericas.length>0 &&
         <div className="banner" style={{marginBottom:14,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
@@ -4616,15 +4835,15 @@ function Extrato({ accounts, update, txs, aiModel }){
         role="button" tabIndex={0}
         onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileRef.current?.click();}}}>
         <Icon name="documento" size={26} style={{opacity:.5}}/>
-        <div className="dzt">Arraste os PDFs aqui ou clique para escolher</div>
-        <div className="dzs">Pode mandar vários de uma vez: extrato do banco A, do banco B, fatura do cartão C…<br/>PDF ou foto (JPG/PNG) de recibo.</div>
+        <div className="dzt">Arraste os arquivos aqui ou clique para escolher</div>
+        <div className="dzs">Pode mandar vários de uma vez: extrato do banco A, do banco B, fatura do cartão C, nota de corretagem…<br/>PDF, foto ou print de tela (JPG/PNG).</div>
       </div>
       <input ref={fileRef} type="file" accept="application/pdf,image/*" multiple style={{display:"none"}}
         onChange={e=>{addFiles(e.target.files); e.target.value="";}}/>
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{display:"none"}}
         onChange={e=>{addFiles(e.target.files); e.target.value="";}}/>
       <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
-        <button className="sbtn" onClick={()=>cameraRef.current?.click()}><Icon name="camera" size={14}/> Fotografar recibo</button>
+        <button className="sbtn" onClick={()=>cameraRef.current?.click()}><Icon name="camera" size={14}/> Tirar foto</button>
         <button className="sbtn" onClick={()=>setShowText(v=>!v)}><Icon name="editar" size={14}/> {showText?"Esconder":"Colar texto"}</button>
         {(docs.length>0||items.length>0) && <button className="sbtn danger" onClick={limparTudo} disabled={running}>Limpar tudo</button>}
       </div>
@@ -4700,6 +4919,25 @@ function Extrato({ accounts, update, txs, aiModel }){
             {pendentes.length} item(ns) marcados ainda estão sem conta (ou sem o destino da transferência) e não serão importados até você escolher.
           </p>}
 
+        {marcados.length>0 &&
+          <div className="massbar">
+            <span className="masslabel"><Icon name="check" size={13}/> {marcados.length} marcado{marcados.length===1?"":"s"} — aplicar em todos:</span>
+            <select className="fld" value="" aria-label="Aplicar conta a todos os marcados"
+              onChange={e=>{ massaConta(e.target.value); e.target.value=""; }}>
+              <option value="">Conta…</option>
+              {accounts.map(a=><option key={a.id} value={a.id}>{a.name}{a.kind==="cartao"?" (cartão)":""}</option>)}
+            </select>
+            <select className="fld" value="" aria-label="Aplicar categoria a todos os marcados"
+              onChange={e=>{ massaCategoria(e.target.value); e.target.value=""; }}>
+              <option value="">Categoria…</option>
+              {Object.entries(CATS).map(([tipo,cats])=>
+                <optgroup key={tipo} label={TYPES[tipo].label}>
+                  {cats.map(([name])=><option key={tipo+name} value={name}>{name}</option>)}
+                </optgroup>)}
+            </select>
+            <button className="sbtn" onClick={()=>setItems(its=>its.map(it=>({...it,selected:false})))}>Desmarcar tudo</button>
+          </div>}
+
         {docsComItens.map(doc=>{
           const docItems=items.filter(it=>it.docId===doc.id);
           const selDoc=docItems.filter(it=>it.selected);
@@ -4716,7 +4954,7 @@ function Extrato({ accounts, update, txs, aiModel }){
                   {doc.meta?.totalDocumento>0 ? ` · total ${brl(doc.meta.totalDocumento)}` : ""}
                 </span>
                 <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                  <span style={{fontSize:12,color:"var(--text-mut)"}}>{tipo==="fatura"?"Cartão:":"Conta:"}</span>
+                  <span style={{fontSize:12,color:"var(--text-mut)"}}>{tipo==="fatura"?"Cartão:":tipo==="nota_corretagem"?"Debita em:":"Conta:"}</span>
                   <select className="fld" style={{width:"auto",minWidth:150,padding:"7px 10px",fontSize:13}}
                     value={doc.meta?.contaId||""} onChange={e=>setDocAccount(doc.id,e.target.value)}>
                     <option value="">Escolher…</option>
@@ -4729,6 +4967,8 @@ function Extrato({ accounts, update, txs, aiModel }){
               </div>
               <div className="docbody">
                 {doc.meta?.observacao && <p className="hint" style={{marginTop:0,marginBottom:8}}>{doc.meta.observacao}{doc.meta.confianca!=null?` · confiança ${Math.round(doc.meta.confianca*100)}%`:""}</p>}
+                {doc.meta?.contaVia==="numero" && <p className="hint" style={{marginTop:0,marginBottom:8,color:"var(--pos)"}}>Conta reconhecida pelo número, não pelo nome — este banco já foi importado antes.</p>}
+                {(doc.meta?.ativos||[]).length>0 && <AtivosDaNota doc={doc} update={update} onDone={()=>patchDoc(doc.id,{meta:{...doc.meta,ativos:[]}})}/>}
                 {acct && tipo==="fatura" && acct.kind!=="cartao" &&
                   <p className="hint" style={{color:"var(--warn)",marginTop:0}}>Esta é uma fatura de cartão, mas a conta escolhida não é um cartão — os gastos vão entrar na conta bancária.</p>}
                 {docItems.map(it=>{
@@ -4928,7 +5168,7 @@ const HELP_SECTIONS=[
   {id:"orcamento-ajuda",n:5,title:"Orçamento",kw:"orçamento limite categoria mês histórico barra aviso estourou exceção"},
   {id:"metas-ajuda",n:6,title:"Metas",kw:"meta guardar dinheiro prazo objetivo poupança ligada categoria real"},
   {id:"investimentos-ajuda",n:7,title:"Investimentos",kw:"investimento ativo aporte provento carteira selic cdi ipca independência financeira"},
-  {id:"extrato-ajuda",n:8,title:"Importar do banco",kw:"extrato inteligente extrato pdf recibo foto importar colar texto duplicata auditoria fatura vários múltiplos bancos open finance lote arrastar progresso ia modelo transferência entre bancos pagamento de fatura"},
+  {id:"extrato-ajuda",n:8,title:"Importar do banco",kw:"extrato inteligente extrato pdf recibo foto print imagem importar colar texto duplicata auditoria fatura nota de corretagem corretora ativos carteira vários múltiplos bancos open finance lote arrastar progresso ia modelo transferência entre bancos pagamento de fatura trocar conta em massa"},
   {id:"assistente-ajuda",n:9,title:"Assistente",kw:"assistente perguntar pergunta ia inteligência artificial"},
   {id:"busca-filtros",n:10,title:"Busca e filtros",kw:"busca buscar filtro filtros chip categoria conta data valor status previsto realizado tag"},
   {id:"panorama-ajuda",n:11,title:"Panorama",kw:"panorama patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"},
@@ -5189,11 +5429,13 @@ function Ajuda({ helpTarget, onConsumeTarget }){
 
         {visible("extrato-ajuda") &&
           <HelpSection id="extrato-ajuda" n={8} title="Importar do banco"
-            purpose="Fechar o mês inteiro de uma vez: joga todos os PDFs dos seus bancos e cartões, a IA lê, identifica e classifica tudo."
+            purpose="Fechar o mês inteiro de uma vez: joga todos os documentos dos seus bancos, cartões e corretora, a IA lê, identifica e classifica tudo."
             steps={[
-              "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extrato do banco A, extrato do banco B, fatura do cartão C. Pode misturar PDF e foto de recibo.",
+              "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.",
               "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.",
-              "Para cada arquivo, a IA decide se é extrato ou fatura, de qual banco é, e casa com a conta ou cartão que você já cadastrou. Se errar a conta, o seletor no cabeçalho do documento troca todos os lançamentos dele de uma vez.",
+              "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.",
+              "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.",
+              "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.",
               "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.",
               "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.",
               "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.",
