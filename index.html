@@ -439,6 +439,38 @@ body{background:#08090D}
 .rz .dropzone:hover,.rz .dropzone.over{border-color:var(--accent);background:var(--accent-bg)}
 .rz .dropzone .dzt{font-size:14px;font-weight:600;margin:8px 0 3px}
 .rz .dropzone .dzs{font-size:12px;color:var(--text-mut);line-height:1.5}
+/* faixa compacta que substitui o dropzone grande depois que já há arquivos na fila */
+.rz .dropzone.compact{padding:11px 14px;display:flex;align-items:center;justify-content:center;gap:7px;
+  font-size:13px;font-weight:500;color:var(--text-mut);margin-top:10px}
+.rz .dropzone.compact:hover{color:var(--accent)}
+
+/* painel de recebimento/leitura — fica no lugar do dropzone, onde a pessoa acabou de clicar */
+.rz .uploadpanel{border:1px solid var(--accent);border-radius:14px;padding:14px;background:color-mix(in srgb, var(--accent) 7%, var(--surface))}
+.rz .uploadpanel .uphead{display:flex;align-items:center;gap:12px}
+.rz .uploadpanel .upheadtxt{flex:1;min-width:0}
+.rz .uploadpanel .upheadtxt b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rz .uploadpanel .upheadtxt span{font-size:12px;color:var(--text-mut);display:block;margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rz .uploadpanel .upcheck{width:34px;height:34px;border-radius:50%;background:var(--pos-bg);color:var(--pos);
+  display:grid;place-items:center;flex:0 0 auto}
+.rz .uploadpanel .upcheck.erro{background:var(--neg-bg);color:var(--neg)}
+.rz .aiorb.small{width:34px;height:34px}
+.rz .aiorb.small .core{width:11px;height:11px}
+.rz .uplist{margin-top:12px;border-top:1px solid var(--hairline);padding-top:4px}
+.rz .uprow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--surface-2);font-size:13px}
+.rz .uprow:last-child{border-bottom:none}
+.rz .uprow .upinfo{flex:1;min-width:0}
+.rz .uprow .upname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rz .uprow .upsize{color:var(--text-mut);font-size:11px;margin-left:5px}
+.rz .uprow .uprowbar{height:4px;border-radius:99px;background:var(--surface-2);overflow:hidden;margin-top:5px}
+.rz .uprow .uprowbar>i{display:block;height:100%;border-radius:99px;background:var(--grad-accent);transition:width .4s cubic-bezier(.4,0,.2,1)}
+@media (max-width:560px){
+  .rz .uprow{flex-wrap:wrap;row-gap:2px}
+  .rz .uprow>svg{order:0;flex:0 0 auto}
+  .rz .uprow .upinfo{order:1;flex:1 1 auto}
+  .rz .uprow .iconsbtn{order:2;flex:0 0 auto}
+  .rz .uprow .dstat{order:3;flex:1 1 100%;font-size:11px;margin-left:25px}
+}
 .rz .dochead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--hairline);border-radius:12px 12px 0 0;background:var(--surface-2)}
 .rz .docbody{border:1px solid var(--hairline);border-top:none;border-radius:0 0 12px 12px;padding:12px 14px;margin-bottom:14px}
 .rz .badge{font-size:10px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;padding:3px 8px;border-radius:999px;background:var(--surface);border:1px solid var(--hairline);color:var(--text-mut)}
@@ -575,7 +607,7 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.9";
+const APP_VERSION = "1.2.13";
 const APP_BUILD = "2026-07-31";
 
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
@@ -4518,6 +4550,22 @@ const DOC_PHASES = {
 };
 const DOC_TIPO_LABEL = { extrato:"Extrato", fatura:"Fatura", nota_corretagem:"Nota de corretagem", recibo:"Recibo", outro:"Documento" };
 const MAX_DOC_BYTES = 3 * 1024 * 1024;
+// só recusamos o que a IA claramente não consegue ler. Qualquer outra coisa (inclusive arquivo sem
+// extensão e sem type, como vem de alguns pickers de nuvem) é aceita e tentada.
+const NAO_LEGIVEL = /^(video|audio)\//i;
+const NAO_LEGIVEL_EXT = /\.(zip|rar|7z|tar|gz|exe|dmg|apk|mp4|mov|avi|mkv|mp3|wav|m4a|docx?|xlsx?|pptx?|csv|txt)$/i;
+const fmtBytes = (b)=>{ if(!b) return ""; if(b<1024) return b+" B"; if(b<1024*1024) return (b/1024).toFixed(0)+" KB"; return (b/1024/1024).toFixed(1)+" MB"; };
+// tipo real do arquivo: alguns pickers entregam type vazio — sem isso a IA receberia mime errado
+const guessMime = (file)=>{
+  if(file.type) return file.type;
+  const n=(file.name||"").toLowerCase();
+  if(/\.pdf$/.test(n)) return "application/pdf";
+  if(/\.(jpg|jpeg)$/.test(n)) return "image/jpeg";
+  if(/\.png$/.test(n)) return "image/png";
+  if(/\.(heic|heif)$/.test(n)) return "image/heic";
+  if(/\.webp$/.test(n)) return "image/webp";
+  return "application/pdf"; // sem pista nenhuma, PDF é o palpite mais provável neste app
+};
 const VALOR_COR = { gasto:"var(--neg)", ganho:"var(--pos)", investimento:"var(--inv)", transferencia:"var(--trf)" };
 const daysApart = (a,b)=>Math.abs((new Date(a+"T00:00:00")-new Date(b+"T00:00:00"))/86400000);
 const normDesc = (s)=>String(s||"").trim().toLowerCase().replace(/\s+/g," ");
@@ -4582,6 +4630,7 @@ function Extrato({ accounts, update, txs, aiModel }){
   const cameraRef=useRef(null);
   const runningRef=useRef(false);
   const queueRef=useRef([]);   // fila real de processamento: aceita arquivos jogados enquanto outra leva roda
+  const statusRef=useRef(null); // painel de status, trazido à vista assim que os arquivos chegam
 
   const patchDoc=(id,patch)=>setDocs(ds=>ds.map(d=>d.id===id?{...d,...patch}:d));
 
@@ -4601,6 +4650,9 @@ function Extrato({ accounts, update, txs, aiModel }){
     return docs.reduce((s,d)=>s+Math.min(1,d.progress),0)/docs.length;
   },[docs]);
   const doneCount=docs.filter(d=>d.status==="pronto"||d.status==="erro").length;
+  const errosCount=docs.filter(d=>d.status==="erro").length;
+  const lidosCount=docs.filter(d=>d.status==="pronto").length;
+  const tudoFalhou=docs.length>0 && errosCount===docs.length;
   const currentDoc=docs.find(d=>d.status!=="pronto"&&d.status!=="erro"&&d.status!=="fila");
 
   async function processOne(doc){
@@ -4610,7 +4662,7 @@ function Extrato({ accounts, update, txs, aiModel }){
       const base64=await fileToBase64(doc.file);
       patchDoc(doc.id,{status:"ia",progress:DOC_PHASES.ia.weight});
       const res=await analyzeDocumentWithAI({
-        base64, mimeType:doc.file.type||"application/pdf", fileName:doc.name, accounts, model:aiModelId(aiModel),
+        base64, mimeType:guessMime(doc.file), fileName:doc.name, accounts, model:aiModelId(aiModel),
       });
       patchDoc(doc.id,{status:"conferindo",progress:DOC_PHASES.conferindo.weight});
       const { meta, rows }=mapAiDocument(res,accounts,doc.id);
@@ -4649,15 +4701,24 @@ function Extrato({ accounts, update, txs, aiModel }){
 
   async function addFiles(fileList){
     const all=Array.from(fileList||[]);
-    const accepted=all.filter(f=>/pdf$/i.test(f.type)||/\.pdf$/i.test(f.name)||/^image\//.test(f.type));
-    if(accepted.length===0){ toast("Envie arquivos PDF ou imagens.","error"); return; }
-    if(accepted.length<all.length) toast(`${all.length-accepted.length} arquivo(s) ignorado(s): só PDF e imagem.`,"error");
+    if(all.length===0) return;
+    // ser tolerante aqui importa: picker de nuvem (Drive, iCloud, WhatsApp) entrega arquivo com type
+    // vazio e às vezes sem extensão. Antes isso era recusado em silêncio e a pessoa ficava sem saber
+    // por que "não aconteceu nada". Agora só recusamos o que claramente não dá pra ler, e o resto vai.
+    const recusados=all.filter(f=>NAO_LEGIVEL.test(f.type)||NAO_LEGIVEL_EXT.test(f.name));
+    const accepted=all.filter(f=>!recusados.includes(f));
+    if(recusados.length) toast(`${recusados.length===1?"1 arquivo não pode ser lido":`${recusados.length} arquivos não podem ser lidos`}: ${recusados.map(f=>f.name).join(", ")}. Envie PDF, foto ou print.`,"error",{duration:7000});
+    if(accepted.length===0) return;
     // o arquivo trafega em base64 (≈ +33%) dentro de um JSON; acima disso a função serverless recusa o corpo
     const grandes=accepted.filter(f=>f.size>MAX_DOC_BYTES);
     if(grandes.length) toast(`${grandes.length} arquivo(s) acima de 3 MB podem falhar na IA — separe em partes menores se der erro.`,"error");
     const novos=accepted.map(f=>({ id:uid(), name:f.name, size:f.size, file:f, status:"fila", progress:0, error:"", aviso:"", meta:null, count:0 }));
     setDocs(ds=>[...ds,...novos]);
     queueRef.current.push(...novos);
+    // confirmação imediata de recebimento, antes de qualquer leitura: a pessoa precisa ver que o
+    // arquivo chegou no mesmo instante em que escolheu, não só quando a IA terminar
+    toast(`${accepted.length} arquivo${accepted.length===1?"":"s"} recebido${accepted.length===1?"":"s"}. Lendo…`,"success");
+    setTimeout(()=>{ statusRef.current?.scrollIntoView({behavior:"smooth",block:"nearest"}); },60);
     if(runningRef.current) return; // já tem uma leva rodando: ela vai consumir estes também
     runningRef.current=true; setRunning(true);
     try{
@@ -4827,16 +4888,89 @@ function Extrato({ accounts, update, txs, aiModel }){
           <button className="sbtn" onClick={()=>goToTab("contas")}><Icon name="banco" size={14}/> Renomear agora</button>
         </div>}
 
-      <div className={"dropzone"+(dragOver?" over":"")}
-        onClick={()=>fileRef.current?.click()}
-        onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-        onDragLeave={()=>setDragOver(false)}
-        onDrop={onDrop}
-        role="button" tabIndex={0}
-        onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileRef.current?.click();}}}>
-        <Icon name="documento" size={26} style={{opacity:.5}}/>
-        <div className="dzt">Arraste os arquivos aqui ou clique para escolher</div>
-        <div className="dzs">Pode mandar vários de uma vez: extrato do banco A, do banco B, fatura do cartão C, nota de corretagem…<br/>PDF, foto ou print de tela (JPG/PNG).</div>
+      {/* o painel de status ocupa o lugar do dropzone assim que os arquivos chegam: o retorno aparece
+          exatamente onde a pessoa acabou de clicar, em vez de num cartão mais abaixo da página */}
+      <div ref={statusRef}>
+        {docs.length===0
+          ? <div className={"dropzone"+(dragOver?" over":"")}
+              onClick={()=>fileRef.current?.click()}
+              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+              onDragLeave={()=>setDragOver(false)}
+              onDrop={onDrop}
+              role="button" tabIndex={0}
+              onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileRef.current?.click();}}}>
+              <Icon name="documento" size={26} style={{opacity:.5}}/>
+              <div className="dzt">Arraste os arquivos aqui ou clique para escolher</div>
+              <div className="dzs">Pode mandar vários de uma vez: extrato do banco A, do banco B, fatura do cartão C, nota de corretagem…<br/>PDF, foto ou print de tela (JPG/PNG).</div>
+            </div>
+          : <React.Fragment>
+              <div className="uploadpanel">
+                <div className="uphead">
+                  {running
+                    ? <React.Fragment>
+                        <div className="aiorb small"><i/><i/><i/><span className="core"/></div>
+                        <div className="upheadtxt">
+                          <b>Lendo {docs.length} documento{docs.length===1?"":"s"}</b>
+                          <span>{doneCount} de {docs.length} concluído{doneCount===1?"":"s"}{currentDoc?` · ${DOC_PHASES[currentDoc.status].label}`:""}</span>
+                        </div>
+                        <span className="aipct">{Math.round(overall*100)}%</span>
+                      </React.Fragment>
+                    : tudoFalhou
+                      ? <React.Fragment>
+                          <span className="upcheck erro"><Icon name="alerta" size={16}/></span>
+                          <div className="upheadtxt">
+                            <b>Não foi possível ler {docs.length===1?"o documento":`os ${docs.length} documentos`}</b>
+                            <span>O motivo aparece abaixo de cada arquivo. Você ainda pode lançar na mão ou tentar de novo.</span>
+                          </div>
+                        </React.Fragment>
+                      : <React.Fragment>
+                          <span className="upcheck"><Icon name="check" size={16}/></span>
+                          <div className="upheadtxt">
+                            <b>{lidosCount} de {docs.length} documento{docs.length===1?"":"s"} lido{lidosCount===1?"":"s"}</b>
+                            <span>{items.length>0 ? `${items.length} lançamento${items.length===1?"":"s"} para revisar abaixo` : "Nenhum lançamento reconhecido"}{errosCount>0?` · ${errosCount} falhou`:""}</span>
+                          </div>
+                          <span className="aipct" style={{color:errosCount>0?"var(--warn)":"var(--pos)"}}>{Math.round((lidosCount/docs.length)*100)}%</span>
+                        </React.Fragment>}
+                </div>
+                {running && <div className="aibar" style={{marginTop:10}}><i style={{width:`${Math.max(2,overall*100)}%`}}/><span/></div>}
+
+                <div className="uplist">
+                  {docs.map(d=>{
+                    const lendo=["lendo","ia","conferindo"].includes(d.status);
+                    return (
+                      <div className={"uprow"+(d.status==="erro"?" erro":"")} key={d.id}>
+                        <Icon name={d.meta?.tipo==="fatura"?"cartao":d.meta?.tipo==="nota_corretagem"?"investimentos":d.meta?.tipo==="recibo"?"camera":"documento"} size={15}
+                          style={{color:d.status==="erro"?"var(--neg)":d.status==="pronto"?"var(--pos)":"var(--text-mut)",flex:"0 0 auto"}}/>
+                        <div className="upinfo">
+                          <div className="upname">{d.name} {d.size>0 && <span className="upsize">{fmtBytes(d.size)}</span>}</div>
+                          {lendo && <div className="uprowbar"><i style={{width:`${Math.max(4,d.progress*100)}%`}}/></div>}
+                        </div>
+                        {d.status==="pronto" && <span className="dstat" style={{color:"var(--pos)"}}><Icon name="check" size={12}/> {d.count} lançamento{d.count===1?"":"s"}</span>}
+                        {d.status==="erro" && <span className="dstat" style={{color:"var(--neg)"}}><Icon name="alerta" size={12}/> falhou</span>}
+                        {d.status==="fila" && <span className="dstat">na fila</span>}
+                        {lendo && <span className="dstat"><i className="dspin"/> {DOC_PHASES[d.status].label} · {Math.round(d.progress*100)}%</span>}
+                        <button className="sbtn iconsbtn" aria-label={"Remover "+d.name} disabled={running} onClick={()=>removeDoc(d.id)}><Icon name="fechar" size={13}/></button>
+                      </div>
+                    );
+                  })}
+                </div>
+                {docs.filter(d=>d.status==="erro").map(d=>(
+                  <p className="hint" key={d.id} style={{color:"var(--neg)",marginTop:6}}>{d.name}: {d.error}</p>
+                ))}
+                {docs.filter(d=>d.aviso).map(d=>(
+                  <p className="hint" key={d.id} style={{color:"var(--warn)",marginTop:6}}>{d.name}: {d.aviso}</p>
+                ))}
+              </div>
+              <div className={"dropzone compact"+(dragOver?" over":"")}
+                onClick={()=>fileRef.current?.click()}
+                onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+                onDragLeave={()=>setDragOver(false)}
+                onDrop={onDrop}
+                role="button" tabIndex={0}
+                onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();fileRef.current?.click();}}}>
+                <Icon name="adicionar" size={15}/> Adicionar mais arquivos
+              </div>
+            </React.Fragment>}
       </div>
       <input ref={fileRef} type="file" accept="application/pdf,image/*" multiple style={{display:"none"}}
         onChange={e=>{addFiles(e.target.files); e.target.value="";}}/>
@@ -4859,44 +4993,7 @@ function Extrato({ accounts, update, txs, aiModel }){
         </div>}
     </div>
 
-    {docs.length>0 &&
-      <div className="card" style={{marginTop:14}}>
-        {running &&
-          <div className="aithink">
-            <div className="aiorb"><i/><i/><i/><span className="core"/></div>
-            <div className="aibody">
-              <div className="aititle">
-                <span>Analisando seus documentos<span className="aidots"/></span>
-                <span className="aipct">{Math.round(overall*100)}%</span>
-              </div>
-              <div className="aiphase">
-                {doneCount} de {docs.length} concluído{doneCount===1?"":"s"}
-                {currentDoc?` · ${DOC_PHASES[currentDoc.status].label}: ${currentDoc.name}`:""}
-              </div>
-              <div className="aibar"><i style={{width:`${Math.max(2,overall*100)}%`}}/><span/></div>
-            </div>
-          </div>}
-        {!running && docs.length>0 &&
-          <h3 style={{marginBottom:8}}>Documentos ({docs.length})</h3>}
-        {docs.map(d=>(
-          <div className="docrow" key={d.id}>
-            <Icon name={d.meta?.tipo==="fatura"?"cartao":d.meta?.tipo==="recibo"?"camera":"documento"} size={15}
-              style={{color:d.status==="erro"?"var(--neg)":"var(--text-mut)",flex:"0 0 auto"}}/>
-            <span className="dname">{d.name}</span>
-            {d.status==="pronto" && <span className="dstat" style={{color:"var(--pos)"}}><Icon name="check" size={12}/> {d.count} lançamento{d.count===1?"":"s"}</span>}
-            {d.status==="erro" && <span className="dstat" style={{color:"var(--neg)"}}><Icon name="alerta" size={12}/> falhou</span>}
-            {d.status==="fila" && <span className="dstat">na fila</span>}
-            {["lendo","ia","conferindo"].includes(d.status) && <span className="dstat"><i className="dspin"/> {DOC_PHASES[d.status].label} · {Math.round(d.progress*100)}%</span>}
-            <button className="sbtn iconsbtn" aria-label="Remover documento" disabled={running} onClick={()=>removeDoc(d.id)}><Icon name="fechar" size={13}/></button>
-          </div>
-        ))}
-        {docs.filter(d=>d.status==="erro").map(d=>(
-          <p className="hint" key={d.id} style={{color:"var(--neg)"}}>{d.name}: {d.error}</p>
-        ))}
-        {docs.filter(d=>d.aviso).map(d=>(
-          <p className="hint" key={d.id} style={{color:"var(--warn)"}}>{d.name}: {d.aviso}</p>
-        ))}
-      </div>}
+
 
     {items.length>0 &&
       <div className="card" style={{marginTop:14}}>

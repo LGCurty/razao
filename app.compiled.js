@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.9 · compilado em 2026-07-31T18:34:29.007Z */
+   Versão 1.2.13 · compilado em 2026-07-31T23:24:52.676Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.9";
+const APP_VERSION = "1.2.13";
 const APP_BUILD = "2026-07-31";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -8695,6 +8695,27 @@ const DOC_TIPO_LABEL = {
   outro: "Documento"
 };
 const MAX_DOC_BYTES = 3 * 1024 * 1024;
+// só recusamos o que a IA claramente não consegue ler. Qualquer outra coisa (inclusive arquivo sem
+// extensão e sem type, como vem de alguns pickers de nuvem) é aceita e tentada.
+const NAO_LEGIVEL = /^(video|audio)\//i;
+const NAO_LEGIVEL_EXT = /\.(zip|rar|7z|tar|gz|exe|dmg|apk|mp4|mov|avi|mkv|mp3|wav|m4a|docx?|xlsx?|pptx?|csv|txt)$/i;
+const fmtBytes = b => {
+  if (!b) return "";
+  if (b < 1024) return b + " B";
+  if (b < 1024 * 1024) return (b / 1024).toFixed(0) + " KB";
+  return (b / 1024 / 1024).toFixed(1) + " MB";
+};
+// tipo real do arquivo: alguns pickers entregam type vazio — sem isso a IA receberia mime errado
+const guessMime = file => {
+  if (file.type) return file.type;
+  const n = (file.name || "").toLowerCase();
+  if (/\.pdf$/.test(n)) return "application/pdf";
+  if (/\.(jpg|jpeg)$/.test(n)) return "image/jpeg";
+  if (/\.png$/.test(n)) return "image/png";
+  if (/\.(heic|heif)$/.test(n)) return "image/heic";
+  if (/\.webp$/.test(n)) return "image/webp";
+  return "application/pdf"; // sem pista nenhuma, PDF é o palpite mais provável neste app
+};
 const VALOR_COR = {
   gasto: "var(--neg)",
   ganho: "var(--pos)",
@@ -8806,6 +8827,7 @@ function Extrato({
   const cameraRef = useRef(null);
   const runningRef = useRef(false);
   const queueRef = useRef([]); // fila real de processamento: aceita arquivos jogados enquanto outra leva roda
+  const statusRef = useRef(null); // painel de status, trazido à vista assim que os arquivos chegam
 
   const patchDoc = (id, patch) => setDocs(ds => ds.map(d => d.id === id ? {
     ...d,
@@ -8830,6 +8852,9 @@ function Extrato({
     return docs.reduce((s, d) => s + Math.min(1, d.progress), 0) / docs.length;
   }, [docs]);
   const doneCount = docs.filter(d => d.status === "pronto" || d.status === "erro").length;
+  const errosCount = docs.filter(d => d.status === "erro").length;
+  const lidosCount = docs.filter(d => d.status === "pronto").length;
+  const tudoFalhou = docs.length > 0 && errosCount === docs.length;
   const currentDoc = docs.find(d => d.status !== "pronto" && d.status !== "erro" && d.status !== "fila");
   async function processOne(doc) {
     patchDoc(doc.id, {
@@ -8845,7 +8870,7 @@ function Extrato({
       });
       const res = await analyzeDocumentWithAI({
         base64,
-        mimeType: doc.file.type || "application/pdf",
+        mimeType: guessMime(doc.file),
         fileName: doc.name,
         accounts,
         model: aiModelId(aiModel)
@@ -8928,12 +8953,16 @@ function Extrato({
   }
   async function addFiles(fileList) {
     const all = Array.from(fileList || []);
-    const accepted = all.filter(f => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name) || /^image\//.test(f.type));
-    if (accepted.length === 0) {
-      toast("Envie arquivos PDF ou imagens.", "error");
-      return;
-    }
-    if (accepted.length < all.length) toast(`${all.length - accepted.length} arquivo(s) ignorado(s): só PDF e imagem.`, "error");
+    if (all.length === 0) return;
+    // ser tolerante aqui importa: picker de nuvem (Drive, iCloud, WhatsApp) entrega arquivo com type
+    // vazio e às vezes sem extensão. Antes isso era recusado em silêncio e a pessoa ficava sem saber
+    // por que "não aconteceu nada". Agora só recusamos o que claramente não dá pra ler, e o resto vai.
+    const recusados = all.filter(f => NAO_LEGIVEL.test(f.type) || NAO_LEGIVEL_EXT.test(f.name));
+    const accepted = all.filter(f => !recusados.includes(f));
+    if (recusados.length) toast(`${recusados.length === 1 ? "1 arquivo não pode ser lido" : `${recusados.length} arquivos não podem ser lidos`}: ${recusados.map(f => f.name).join(", ")}. Envie PDF, foto ou print.`, "error", {
+      duration: 7000
+    });
+    if (accepted.length === 0) return;
     // o arquivo trafega em base64 (≈ +33%) dentro de um JSON; acima disso a função serverless recusa o corpo
     const grandes = accepted.filter(f => f.size > MAX_DOC_BYTES);
     if (grandes.length) toast(`${grandes.length} arquivo(s) acima de 3 MB podem falhar na IA — separe em partes menores se der erro.`, "error");
@@ -8951,6 +8980,15 @@ function Extrato({
     }));
     setDocs(ds => [...ds, ...novos]);
     queueRef.current.push(...novos);
+    // confirmação imediata de recebimento, antes de qualquer leitura: a pessoa precisa ver que o
+    // arquivo chegou no mesmo instante em que escolheu, não só quando a IA terminar
+    toast(`${accepted.length} arquivo${accepted.length === 1 ? "" : "s"} recebido${accepted.length === 1 ? "" : "s"}. Lendo…`, "success");
+    setTimeout(() => {
+      statusRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest"
+      });
+    }, 60);
     if (runningRef.current) return; // já tem uma leva rodando: ela vai consumir estes também
     runningRef.current = true;
     setRunning(true);
@@ -9215,6 +9253,8 @@ function Extrato({
     name: "banco",
     size: 14
   }), " Renomear agora")), /*#__PURE__*/React.createElement("div", {
+    ref: statusRef
+  }, docs.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "dropzone" + (dragOver ? " over" : ""),
     onClick: () => fileRef.current?.click(),
     onDragOver: e => {
@@ -9241,7 +9281,138 @@ function Extrato({
     className: "dzt"
   }, "Arraste os arquivos aqui ou clique para escolher"), /*#__PURE__*/React.createElement("div", {
     className: "dzs"
-  }, "Pode mandar vários de uma vez: extrato do banco A, do banco B, fatura do cartão C, nota de corretagem…", /*#__PURE__*/React.createElement("br", null), "PDF, foto ou print de tela (JPG/PNG).")), /*#__PURE__*/React.createElement("input", {
+  }, "Pode mandar vários de uma vez: extrato do banco A, do banco B, fatura do cartão C, nota de corretagem…", /*#__PURE__*/React.createElement("br", null), "PDF, foto ou print de tela (JPG/PNG).")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "uploadpanel"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "uphead"
+  }, running ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "aiorb small"
+  }, /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("span", {
+    className: "core"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "upheadtxt"
+  }, /*#__PURE__*/React.createElement("b", null, "Lendo ", docs.length, " documento", docs.length === 1 ? "" : "s"), /*#__PURE__*/React.createElement("span", null, doneCount, " de ", docs.length, " concluído", doneCount === 1 ? "" : "s", currentDoc ? ` · ${DOC_PHASES[currentDoc.status].label}` : "")), /*#__PURE__*/React.createElement("span", {
+    className: "aipct"
+  }, Math.round(overall * 100), "%")) : tudoFalhou ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    className: "upcheck erro"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "alerta",
+    size: 16
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "upheadtxt"
+  }, /*#__PURE__*/React.createElement("b", null, "Não foi possível ler ", docs.length === 1 ? "o documento" : `os ${docs.length} documentos`), /*#__PURE__*/React.createElement("span", null, "O motivo aparece abaixo de cada arquivo. Você ainda pode lançar na mão ou tentar de novo."))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    className: "upcheck"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "check",
+    size: 16
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "upheadtxt"
+  }, /*#__PURE__*/React.createElement("b", null, lidosCount, " de ", docs.length, " documento", docs.length === 1 ? "" : "s", " lido", lidosCount === 1 ? "" : "s"), /*#__PURE__*/React.createElement("span", null, items.length > 0 ? `${items.length} lançamento${items.length === 1 ? "" : "s"} para revisar abaixo` : "Nenhum lançamento reconhecido", errosCount > 0 ? ` · ${errosCount} falhou` : "")), /*#__PURE__*/React.createElement("span", {
+    className: "aipct",
+    style: {
+      color: errosCount > 0 ? "var(--warn)" : "var(--pos)"
+    }
+  }, Math.round(lidosCount / docs.length * 100), "%"))), running && /*#__PURE__*/React.createElement("div", {
+    className: "aibar",
+    style: {
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("i", {
+    style: {
+      width: `${Math.max(2, overall * 100)}%`
+    }
+  }), /*#__PURE__*/React.createElement("span", null)), /*#__PURE__*/React.createElement("div", {
+    className: "uplist"
+  }, docs.map(d => {
+    const lendo = ["lendo", "ia", "conferindo"].includes(d.status);
+    return /*#__PURE__*/React.createElement("div", {
+      className: "uprow" + (d.status === "erro" ? " erro" : ""),
+      key: d.id
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: d.meta?.tipo === "fatura" ? "cartao" : d.meta?.tipo === "nota_corretagem" ? "investimentos" : d.meta?.tipo === "recibo" ? "camera" : "documento",
+      size: 15,
+      style: {
+        color: d.status === "erro" ? "var(--neg)" : d.status === "pronto" ? "var(--pos)" : "var(--text-mut)",
+        flex: "0 0 auto"
+      }
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "upinfo"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "upname"
+    }, d.name, " ", d.size > 0 && /*#__PURE__*/React.createElement("span", {
+      className: "upsize"
+    }, fmtBytes(d.size))), lendo && /*#__PURE__*/React.createElement("div", {
+      className: "uprowbar"
+    }, /*#__PURE__*/React.createElement("i", {
+      style: {
+        width: `${Math.max(4, d.progress * 100)}%`
+      }
+    }))), d.status === "pronto" && /*#__PURE__*/React.createElement("span", {
+      className: "dstat",
+      style: {
+        color: "var(--pos)"
+      }
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "check",
+      size: 12
+    }), " ", d.count, " lançamento", d.count === 1 ? "" : "s"), d.status === "erro" && /*#__PURE__*/React.createElement("span", {
+      className: "dstat",
+      style: {
+        color: "var(--neg)"
+      }
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "alerta",
+      size: 12
+    }), " falhou"), d.status === "fila" && /*#__PURE__*/React.createElement("span", {
+      className: "dstat"
+    }, "na fila"), lendo && /*#__PURE__*/React.createElement("span", {
+      className: "dstat"
+    }, /*#__PURE__*/React.createElement("i", {
+      className: "dspin"
+    }), " ", DOC_PHASES[d.status].label, " · ", Math.round(d.progress * 100), "%"), /*#__PURE__*/React.createElement("button", {
+      className: "sbtn iconsbtn",
+      "aria-label": "Remover " + d.name,
+      disabled: running,
+      onClick: () => removeDoc(d.id)
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: "fechar",
+      size: 13
+    })));
+  })), docs.filter(d => d.status === "erro").map(d => /*#__PURE__*/React.createElement("p", {
+    className: "hint",
+    key: d.id,
+    style: {
+      color: "var(--neg)",
+      marginTop: 6
+    }
+  }, d.name, ": ", d.error)), docs.filter(d => d.aviso).map(d => /*#__PURE__*/React.createElement("p", {
+    className: "hint",
+    key: d.id,
+    style: {
+      color: "var(--warn)",
+      marginTop: 6
+    }
+  }, d.name, ": ", d.aviso))), /*#__PURE__*/React.createElement("div", {
+    className: "dropzone compact" + (dragOver ? " over" : ""),
+    onClick: () => fileRef.current?.click(),
+    onDragOver: e => {
+      e.preventDefault();
+      setDragOver(true);
+    },
+    onDragLeave: () => setDragOver(false),
+    onDrop: onDrop,
+    role: "button",
+    tabIndex: 0,
+    onKeyDown: e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        fileRef.current?.click();
+      }
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "adicionar",
+    size: 15
+  }), " Adicionar mais arquivos"))), /*#__PURE__*/React.createElement("input", {
     ref: fileRef,
     type: "file",
     accept: "application/pdf,image/*",
@@ -9310,92 +9481,7 @@ function Extrato({
     disabled: !text.trim()
   }, "Analisar texto colado"), /*#__PURE__*/React.createElement("p", {
     className: "hint"
-  }, "Leitura local, sem IA: uma linha por lançamento, no formato \"DD/MM/AAAA descrição valor\". Valor negativo vira gasto, positivo vira ganho."))), docs.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "card",
-    style: {
-      marginTop: 14
-    }
-  }, running && /*#__PURE__*/React.createElement("div", {
-    className: "aithink"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "aiorb"
-  }, /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("i", null), /*#__PURE__*/React.createElement("span", {
-    className: "core"
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "aibody"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "aititle"
-  }, /*#__PURE__*/React.createElement("span", null, "Analisando seus documentos", /*#__PURE__*/React.createElement("span", {
-    className: "aidots"
-  })), /*#__PURE__*/React.createElement("span", {
-    className: "aipct"
-  }, Math.round(overall * 100), "%")), /*#__PURE__*/React.createElement("div", {
-    className: "aiphase"
-  }, doneCount, " de ", docs.length, " concluído", doneCount === 1 ? "" : "s", currentDoc ? ` · ${DOC_PHASES[currentDoc.status].label}: ${currentDoc.name}` : ""), /*#__PURE__*/React.createElement("div", {
-    className: "aibar"
-  }, /*#__PURE__*/React.createElement("i", {
-    style: {
-      width: `${Math.max(2, overall * 100)}%`
-    }
-  }), /*#__PURE__*/React.createElement("span", null)))), !running && docs.length > 0 && /*#__PURE__*/React.createElement("h3", {
-    style: {
-      marginBottom: 8
-    }
-  }, "Documentos (", docs.length, ")"), docs.map(d => /*#__PURE__*/React.createElement("div", {
-    className: "docrow",
-    key: d.id
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: d.meta?.tipo === "fatura" ? "cartao" : d.meta?.tipo === "recibo" ? "camera" : "documento",
-    size: 15,
-    style: {
-      color: d.status === "erro" ? "var(--neg)" : "var(--text-mut)",
-      flex: "0 0 auto"
-    }
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "dname"
-  }, d.name), d.status === "pronto" && /*#__PURE__*/React.createElement("span", {
-    className: "dstat",
-    style: {
-      color: "var(--pos)"
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "check",
-    size: 12
-  }), " ", d.count, " lançamento", d.count === 1 ? "" : "s"), d.status === "erro" && /*#__PURE__*/React.createElement("span", {
-    className: "dstat",
-    style: {
-      color: "var(--neg)"
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "alerta",
-    size: 12
-  }), " falhou"), d.status === "fila" && /*#__PURE__*/React.createElement("span", {
-    className: "dstat"
-  }, "na fila"), ["lendo", "ia", "conferindo"].includes(d.status) && /*#__PURE__*/React.createElement("span", {
-    className: "dstat"
-  }, /*#__PURE__*/React.createElement("i", {
-    className: "dspin"
-  }), " ", DOC_PHASES[d.status].label, " · ", Math.round(d.progress * 100), "%"), /*#__PURE__*/React.createElement("button", {
-    className: "sbtn iconsbtn",
-    "aria-label": "Remover documento",
-    disabled: running,
-    onClick: () => removeDoc(d.id)
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "fechar",
-    size: 13
-  })))), docs.filter(d => d.status === "erro").map(d => /*#__PURE__*/React.createElement("p", {
-    className: "hint",
-    key: d.id,
-    style: {
-      color: "var(--neg)"
-    }
-  }, d.name, ": ", d.error)), docs.filter(d => d.aviso).map(d => /*#__PURE__*/React.createElement("p", {
-    className: "hint",
-    key: d.id,
-    style: {
-      color: "var(--warn)"
-    }
-  }, d.name, ": ", d.aviso))), items.length > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Leitura local, sem IA: uma linha por lançamento, no formato \"DD/MM/AAAA descrição valor\". Valor negativo vira gasto, positivo vira ganho."))), items.length > 0 && /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       marginTop: 14
