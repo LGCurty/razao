@@ -174,14 +174,23 @@ module.exports = async (req, res) => {
       if (!UUID.test(accountId || "")) { res.status(400).json({ error: "Conta inválida." }); return; }
       if (from && !DATA_ISO.test(from)) { res.status(400).json({ error: "Data inicial inválida." }); return; }
       if (to && !DATA_ISO.test(to)) { res.status(400).json({ error: "Data final inválida." }); return; }
-      const page = Math.min(200, Math.max(1, Math.round(Number(corpo.page) || 1)));
-      const d = await chamarPluggy(apiKey, "GET", "/transactions", { accountId, from, to, page, pageSize: 500 });
-      res.status(200).json({
-        results: d.results || [],
-        page: d.page || page,
-        totalPages: d.totalPages || 1,
-        total: d.total || (d.results || []).length,
-      });
+      // GET /transactions (page/totalPages) foi aposentado pelo Pluggy — o substituto é /v2/transactions,
+      // paginado por cursor: cada resposta traz {results, next}, onde "next" é uma URL cujo parâmetro
+      // "after" vira o cursor da chamada seguinte, até "next" vir null. A paginação fica só aqui dentro:
+      // quem chama este proxy recebe a lista inteira de uma vez, como recebia antes.
+      const results = [];
+      let after = "";
+      for (let volta = 0; volta < 20; volta++) { // teto de segurança: 20 × 500 = 10 mil lançamentos
+        const d = await chamarPluggy(apiKey, "GET", "/v2/transactions", {
+          accountId, dateFrom: from, dateTo: to, after: after || undefined, pageSize: 500,
+        });
+        results.push(...(d.results || []));
+        if (!d.next) break;
+        try { after = new URL(d.next, "https://api.pluggy.ai").searchParams.get("after") || ""; }
+        catch (e) { after = ""; }
+        if (!after) break;
+      }
+      res.status(200).json({ results, total: results.length });
       return;
     }
 

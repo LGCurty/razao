@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.24 · compilado em 2026-08-23T20:13:51.422Z */
+   Versão 1.2.26 · compilado em 2026-08-23T20:38:27.775Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.24";
+const APP_VERSION = "1.2.26";
 const APP_BUILD = "2026-08-23";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -9253,20 +9253,14 @@ function OpenFinance({
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   }
   async function buscarLancamentos(accountId, from, to) {
-    const todos = [];
-    // o Pluggy pagina de 500 em 500; 20 páginas (10 mil lançamentos) é teto de segurança para não
-    // travar o navegador se alguém pedir um período gigante
-    for (let page = 1; page <= 20; page++) {
-      const r = await pluggyApi("transactions", {
-        accountId,
-        from,
-        to,
-        page
-      });
-      todos.push(...(r.results || []));
-      if (page >= (r.totalPages || 1)) break;
-    }
-    return todos;
+    // a paginação por cursor do Pluggy (GET /v2/transactions) acontece dentro de api/pluggy.js — aqui
+    // é só uma chamada, que já volta com a lista inteira do período
+    const r = await pluggyApi("transactions", {
+      accountId,
+      from,
+      to
+    });
+    return r.results || [];
   }
   async function sincronizar(conexao) {
     if (busy) return;

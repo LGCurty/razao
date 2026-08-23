@@ -610,7 +610,7 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.24";
+const APP_VERSION = "1.2.26";
 const APP_BUILD = "2026-08-23";
 
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
@@ -4932,15 +4932,10 @@ function OpenFinance({ accounts, update, pluggy, categoryMemory, jaImportados, o
   }
 
   async function buscarLancamentos(accountId, from, to){
-    const todos=[];
-    // o Pluggy pagina de 500 em 500; 20 páginas (10 mil lançamentos) é teto de segurança para não
-    // travar o navegador se alguém pedir um período gigante
-    for(let page=1; page<=20; page++){
-      const r=await pluggyApi("transactions",{ accountId, from, to, page });
-      todos.push(...(r.results||[]));
-      if(page>=(r.totalPages||1)) break;
-    }
-    return todos;
+    // a paginação por cursor do Pluggy (GET /v2/transactions) acontece dentro de api/pluggy.js — aqui
+    // é só uma chamada, que já volta com a lista inteira do período
+    const r=await pluggyApi("transactions",{ accountId, from, to });
+    return r.results||[];
   }
 
   async function sincronizar(conexao){
