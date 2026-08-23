@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.22 · compilado em 2026-08-23T19:31:06.991Z */
+   Versão 1.2.24 · compilado em 2026-08-23T20:13:51.422Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.22";
+const APP_VERSION = "1.2.24";
 const APP_BUILD = "2026-08-23";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -1645,7 +1645,14 @@ async function pluggyApi(action, payload) {
     throw new Error("Sem conexão com o servidor do app. Tente de novo em instantes.");
   }
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || "Não foi possível falar com o Open Finance agora.");
+  // guarda o status HTTP no próprio erro: quem chama decide a mensagem amigável pelo código, não
+  // tentando adivinhar pelo texto — o Pluggy responde em inglês ("item not found"), então procurar
+  // "404" ou "não encontrad" no texto deixava esse erro específico passar cru para a tela
+  if (!r.ok) {
+    const e = new Error(data.error || "Não foi possível falar com o Open Finance agora.");
+    e.status = r.status;
+    throw e;
+  }
   return data;
 }
 const PLUGGY_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -9475,7 +9482,10 @@ function OpenFinance({
       sincronizar(nova);
     } catch (err) {
       if (vivo.current) {
-        setErro(/404|não encontrad/i.test(err.message || "") ? "O Pluggy não achou essa conexão. Confira se o itemId foi copiado inteiro e se ele é da mesma aplicação (mesmo Client ID) configurada aqui." : err.message || "Não foi possível conferir essa conexão.");
+        // o Pluggy só deixa uma aplicação enxergar os itens que ELA MESMA criou — um itemId de uma
+        // conexão feita no Meu Pluggy pertence à aplicação do Meu Pluggy, não à sua (mesmo que o
+        // itemId esteja copiado certinho). "não achado" aqui quase sempre é isso, não erro de digitação.
+        setErro(err.status === 404 ? "O Pluggy não encontrou essa conexão nesta aplicação. Se ela foi feita no Meu Pluggy, é esperado: o Meu Pluggy usa uma aplicação diferente da sua, e o Pluggy não deixa uma aplicação ler conexões de outra. Para trazer esse banco pelo Razão, use \"Conectar meu banco\" acima (cria a conexão direto na sua aplicação) — e se aparecer aviso de conta demo/sandbox, é preciso liberar acesso a dados reais para a sua aplicação em dashboard.pluggy.ai." : err.message || "Não foi possível conferir essa conexão.");
         setBusy("");
         setEtapa({
           label: "",
