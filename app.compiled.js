@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.20 · compilado em 2026-08-23T18:23:39.624Z */
+   Versão 1.2.22 · compilado em 2026-08-23T19:31:06.991Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.20";
+const APP_VERSION = "1.2.22";
 const APP_BUILD = "2026-08-23";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -1584,21 +1584,34 @@ function BrandMark({
    Segurança: CLIENT_ID e CLIENT_SECRET ficam só na função serverless (api/pluggy.js). O navegador
    recebe no máximo um Connect Token de 30 minutos, que só serve para abrir a tela de conexão.
    ======================================================================= */
-const PLUGGY_CONNECT_SRC = "https://cdn.pluggy.ai/pluggy-connect/v2.9.0/pluggy-connect.js";
+// "latest" é o caminho oficial do próprio CDN do Pluggy e não deveria mudar; a versão fixa é só uma
+// segunda tentativa, caso o alias alguma vez fique fora do ar sem viver instável para sempre.
+const PLUGGY_CONNECT_SRCS = ["https://cdn.pluggy.ai/pluggy-connect/latest/pluggy-connect.js", "https://cdn.pluggy.ai/pluggy-connect/v2.7.0/pluggy-connect.js"];
 let pluggyConnectPromise = null;
-function loadPluggyConnect() {
-  if (window.PluggyConnect) return Promise.resolve(window.PluggyConnect);
-  if (pluggyConnectPromise) return pluggyConnectPromise;
-  pluggyConnectPromise = new Promise((resolve, reject) => {
+function carregarScript(src) {
+  return new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = PLUGGY_CONNECT_SRC;
-    s.onload = () => window.PluggyConnect ? resolve(window.PluggyConnect) : (pluggyConnectPromise = null, reject(new Error("A tela de conexão com o banco não carregou direito. Tente de novo.")));
-    s.onerror = () => {
-      pluggyConnectPromise = null;
-      reject(new Error("Não foi possível carregar a tela de conexão com o banco. Verifique sua conexão e tente de novo."));
-    };
+    s.src = src;
+    s.onload = () => window.PluggyConnect ? resolve(window.PluggyConnect) : reject(new Error("vazio"));
+    s.onerror = () => reject(new Error("falhou"));
     document.head.appendChild(s);
   });
+}
+async function loadPluggyConnect() {
+  if (window.PluggyConnect) return window.PluggyConnect;
+  if (pluggyConnectPromise) return pluggyConnectPromise;
+  pluggyConnectPromise = (async () => {
+    for (let i = 0; i < PLUGGY_CONNECT_SRCS.length; i++) {
+      try {
+        return await carregarScript(PLUGGY_CONNECT_SRCS[i]);
+      } catch (e) {
+        if (i === PLUGGY_CONNECT_SRCS.length - 1) {
+          pluggyConnectPromise = null;
+          throw new Error("Não foi possível carregar a tela de conexão com o banco. Verifique sua conexão e tente de novo.");
+        }
+      }
+    }
+  })();
   return pluggyConnectPromise;
 }
 
