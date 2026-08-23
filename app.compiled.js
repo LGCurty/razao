@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.18 · compilado em 2026-08-23T17:58:27.795Z */
+   Versão 1.2.20 · compilado em 2026-08-23T18:23:39.624Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.18";
+const APP_VERSION = "1.2.20";
 const APP_BUILD = "2026-08-23";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -1635,6 +1635,7 @@ async function pluggyApi(action, payload) {
   if (!r.ok) throw new Error(data.error || "Não foi possível falar com o Open Finance agora.");
   return data;
 }
+const PLUGGY_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const PLUGGY_SUBTIPO = {
   CHECKING_ACCOUNT: "Conta corrente",
   SAVINGS_ACCOUNT: "Poupança",
@@ -1754,8 +1755,11 @@ function mapPluggyDocs({
   txPorConta,
   accounts,
   categoryMemory,
-  conexao
+  conexao,
+  jaImportados
 }) {
+  const conhecidos = jaImportados instanceof Set ? jaImportados : new Set();
+  let ignorados = 0;
   const resolvidas = contas.map(c => ({
     pluggy: c,
     ...matchPluggyAccount(c, accounts)
@@ -1790,6 +1794,15 @@ function mapPluggyDocs({
       const bruto = Number(t.amount) || 0;
       const cents = Math.round(Math.abs(bruto) * 100);
       if (cents <= 0) return;
+      // o id do lançamento no Pluggy é a defesa exata contra reimportar o mesmo mês duas vezes —
+      // não depende de data, valor nem descrição baterem, então sobrevive a uma descrição que o
+      // banco reescreve depois de efetivar. O casamento por data+valor+descrição continua valendo
+      // como segunda camada, para o que veio de PDF e não tem id.
+      const pluggyId = String(t.id || "").trim();
+      if (pluggyId && conhecidos.has(pluggyId)) {
+        ignorados++;
+        return;
+      }
       const tipoPluggy = String(t.type || "").toUpperCase();
       const saida = tipoPluggy === "DEBIT" ? true : tipoPluggy === "CREDIT" ? false : isCard ? bruto > 0 : bruto < 0;
       const date = DATE_RE.test(String(t.date || "").slice(0, 10)) ? String(t.date).slice(0, 10) : todayISO();
@@ -1858,12 +1871,16 @@ function mapPluggyDocs({
         acctId,
         toAcctId,
         natureza,
+        pluggyId,
         // lançamento ainda não efetivado no banco pode mudar de valor ou sumir: marcar com confiança
         // baixa faz a etiqueta "conferir" aparecer na revisão
         confidence: String(t.status || "").toUpperCase() === "PENDING" ? 0.4 : null,
         selected: true
       });
     });
+
+    // conta cujos lançamentos já tinham sido importados não vira um documento vazio na revisão
+    if (rows.every(x => x.docId !== docId)) return;
     const rotulo = PLUGGY_SUBTIPO[c.subtype] || (isCard ? "Cartão de crédito" : "Conta");
     docs.push({
       id: docId,
@@ -1898,7 +1915,8 @@ function mapPluggyDocs({
   });
   return {
     docs,
-    rows
+    rows,
+    ignorados
   };
 }
 const SEED = {
@@ -9174,6 +9192,7 @@ function OpenFinance({
   update,
   pluggy,
   categoryMemory,
+  jaImportados,
   onResultado
 }) {
   const conexoes = pluggy?.items || [];
@@ -9186,6 +9205,8 @@ function OpenFinance({
   const [erro, setErro] = useState("");
   const [periodo, setPeriodo] = useState("auto");
   const [aberto, setAberto] = useState(false);
+  const [colando, setColando] = useState(false); // formulário de itemId do Meu Pluggy
+  const [itemIdTxt, setItemIdTxt] = useState("");
   const vivo = useRef(true);
   useEffect(() => () => {
     vivo.current = false;
@@ -9282,25 +9303,28 @@ function OpenFinance({
       });
       const {
         docs,
-        rows
+        rows,
+        ignorados
       } = mapPluggyDocs({
         contas,
         txPorConta,
         accounts,
         categoryMemory,
+        jaImportados,
         conexao: {
           id: conexao.id,
           connectorName: conexao.connectorName
         }
       });
+      const jaEstavam = ignorados > 0 ? ` ${ignorados} já ${ignorados === 1 ? "tinha sido importado" : "tinham sido importados"} antes.` : "";
       if (rows.length === 0) {
-        toast(`Nenhum lançamento novo no ${conexao.connectorName} nesse período.`, "default");
+        toast(`Nenhum lançamento novo no ${conexao.connectorName} nesse período.${jaEstavam}`, "default");
       } else {
         onResultado({
           docs,
           rows
         });
-        toast(`${rows.length} lançamento${rows.length === 1 ? "" : "s"} do ${conexao.connectorName} prontos para revisar.`, "success");
+        toast(`${rows.length} lançamento${rows.length === 1 ? "" : "s"} do ${conexao.connectorName} para revisar.${jaEstavam}`, "success");
       }
       update(d => ({
         pluggy: {
@@ -9380,6 +9404,65 @@ function OpenFinance({
     } catch (err) {
       if (vivo.current) {
         setErro(err.message || "Não foi possível abrir a conexão.");
+        setBusy("");
+        setEtapa({
+          label: "",
+          pct: 0
+        });
+      }
+    }
+  }
+
+  /* Quem já conectou os bancos no Meu Pluggy (meu.pluggy.ai) não precisa do widget: basta colar aqui
+     o itemId de cada conexão. O app confere o id na API antes de guardar, para não deixar você com
+     um id errado salvo e um erro só aparecendo na hora de atualizar. */
+  async function adicionarPorId() {
+    const id = itemIdTxt.trim().toLowerCase();
+    if (!PLUGGY_UUID.test(id)) {
+      setErro("Esse itemId não tem o formato certo. Ele parece com 11111111-2222-3333-4444-555555555555.");
+      return;
+    }
+    if (conexoes.some(c => c.id === id)) {
+      setErro("Essa conexão já está na lista.");
+      return;
+    }
+    setErro("");
+    setBusy("conectando");
+    setEtapa({
+      label: "Conferindo a conexão…",
+      pct: 0.4
+    });
+    try {
+      const info = await pluggyApi("item", {
+        itemId: id
+      });
+      if (!vivo.current) return;
+      const nova = {
+        id,
+        connectorName: info.connector?.name || "Banco",
+        connectorImage: info.connector?.imageUrl || "",
+        createdAt: new Date().toISOString(),
+        lastSyncAt: "",
+        lastStatus: info.status || ""
+      };
+      update(d => ({
+        pluggy: {
+          ...d.pluggy,
+          items: [...d.pluggy.items.filter(i => i.id !== id), nova]
+        }
+      }));
+      setColando(false);
+      setItemIdTxt("");
+      setBusy("");
+      setEtapa({
+        label: "",
+        pct: 0
+      });
+      toast(`${nova.connectorName} adicionado. Buscando os lançamentos…`, "success");
+      sincronizar(nova);
+    } catch (err) {
+      if (vivo.current) {
+        setErro(/404|não encontrad/i.test(err.message || "") ? "O Pluggy não achou essa conexão. Confira se o itemId foi copiado inteiro e se ele é da mesma aplicação (mesmo Client ID) configurada aqui." : err.message || "Não foi possível conferir essa conexão.");
         setBusy("");
         setEtapa({
           label: "",
@@ -9546,7 +9629,17 @@ function OpenFinance({
   }), " Abrindo…") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Icon, {
     name: "banco",
     size: 14
-  }), " Conectar meu banco")), conexoes.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+  }), " Conectar meu banco")), /*#__PURE__*/React.createElement("button", {
+    className: "sbtn",
+    disabled: !!busy,
+    onClick: () => {
+      setColando(v => !v);
+      setErro("");
+    }
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "editar",
+    size: 14
+  }), " ", colando ? "Cancelar" : "Já uso o Meu Pluggy"), conexoes.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
     className: "hint",
     style: {
       margin: 0
@@ -9568,7 +9661,50 @@ function OpenFinance({
     value: "90"
   }, "Últimos 90 dias"), /*#__PURE__*/React.createElement("option", {
     value: "365"
-  }, "Últimos 12 meses")))), conexoes.length > 0 && /*#__PURE__*/React.createElement("p", {
+  }, "Últimos 12 meses")))), podeConectar && colando && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "hint",
+    style: {
+      marginTop: 0
+    }
+  }, "Se os seus bancos já estão conectados em ", /*#__PURE__*/React.createElement("span", {
+    className: "num"
+  }, "meu.pluggy.ai"), ", não precisa conectar de novo: abra a conexão lá, copie o ", /*#__PURE__*/React.createElement("b", null, "itemId"), " e cole aqui. Um itemId por vez — repita para cada banco."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      alignItems: "center"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "fld",
+    style: {
+      flex: "1 1 320px",
+      fontFamily: "'IBM Plex Mono',monospace",
+      fontSize: 13
+    },
+    placeholder: "11111111-2222-3333-4444-555555555555",
+    value: itemIdTxt,
+    onChange: e => setItemIdTxt(e.target.value),
+    onKeyDown: e => {
+      if (e.key === "Enter" && !busy) adicionarPorId();
+    },
+    "aria-label": "itemId da conexão no Meu Pluggy"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "sbtn primary",
+    disabled: !!busy || !itemIdTxt.trim(),
+    onClick: adicionarPorId
+  }, busy === "conectando" ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("i", {
+    className: "dspin"
+  }), " Conferindo…") : "Adicionar")), /*#__PURE__*/React.createElement("p", {
+    className: "hint",
+    style: {
+      marginBottom: 0
+    }
+  }, "O itemId só funciona aqui se tiver sido criado pela ", /*#__PURE__*/React.createElement("b", null, "mesma aplicação"), " do Pluggy cujo Client ID está configurado no servidor.")), conexoes.length > 0 && /*#__PURE__*/React.createElement("p", {
     className: "hint",
     style: {
       marginBottom: 0
@@ -9915,6 +10051,9 @@ function Extrato({
       status: it.date > todayISO() ? "previsto" : "realizado"
     };
     if (it.type === "transferencia") base.toAcctId = it.toAcctId;
+    // guarda o id do lançamento no Pluggy: é por ele que a próxima sincronização sabe que este
+    // já entrou, mesmo que o banco reescreva a descrição depois de efetivar
+    if (it.pluggyId) base.pluggyId = it.pluggyId;
     return base;
   }
   function aprovar(lista) {
@@ -9993,6 +10132,10 @@ function Extrato({
   // escolhendo a conta na mão em todo documento — vale avisar antes de ela perder tempo.
   const contasGenericas = accounts.filter(a => /^(conta|cartão|cartao|conta principal|cartão de crédito|cartao de credito|carteira|banco)$/i.test((a.name || "").trim()));
 
+  // ids de lançamento do Pluggy que já entraram no histórico: a sincronização usa isso para não
+  // trazer de novo o que já foi importado, por mais que os períodos se sobreponham
+  const pluggyIdsSalvos = useMemo(() => new Set(txs.filter(t => t.pluggyId).map(t => t.pluggyId)), [txs]);
+
   /* resultado do Open Finance entra pela mesma porta dos arquivos: um "documento" por conta do banco,
      já pronto, e as linhas na mesma lista de revisão. Sincronizar de novo substitui o documento
      anterior daquela conta em vez de duplicá-lo. */
@@ -10015,6 +10158,7 @@ function Extrato({
     update: update,
     pluggy: pluggy,
     categoryMemory: categoryMemory,
+    jaImportados: pluggyIdsSalvos,
     onResultado: receberDoOpenFinance
   }), /*#__PURE__*/React.createElement("div", {
     className: "card",
@@ -11579,7 +11723,7 @@ function Ajuda({
     n: 8,
     title: "Importar do banco",
     purpose: "Fechar o mês inteiro de uma vez: conecte o banco pelo Open Finance ou jogue aqui todos os documentos dos seus bancos, cartões e corretora — a IA lê, identifica e classifica tudo.",
-    steps: ["Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.", "Conectado o banco, o resto da tela continua valendo para o que o Open Finance não cobre: notas de corretagem, recibos, prints e bancos que você não quer conectar.", "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.", "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.", "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
+    steps: ["Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.", "Se os seus bancos já estão conectados no Meu Pluggy (meu.pluggy.ai), use \"Já uso o Meu Pluggy\": cole o itemId de cada conexão e pronto, sem passar pela tela de conectar de novo. O app confere o id antes de guardar. Vale lembrar que o itemId precisa ter sido criado pela mesma aplicação do Pluggy configurada no servidor.", "Atualizar duas vezes no mesmo mês não duplica nada: cada lançamento importado guarda o id que tem no Pluggy, e o que já entrou é ignorado na busca seguinte — o app avisa quantos ficaram de fora.", "Conectado o banco, o resto da tela continua valendo para o que o Open Finance não cobre: notas de corretagem, recibos, prints e bancos que você não quer conectar.", "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.", "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.", "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
     tip: "Se a IA estiver fora do ar ou sem cota, o PDF ainda é lido localmente pelo leitor embutido (só reconhece gasto e ganho, sem identificar banco nem transferência). Em Configurações dá para trocar o motor de IA entre Rápido e Cuidadoso — vale mudar para Cuidadoso quando alguma fatura vier com muitas linhas erradas. Arquivos acima de 3 MB podem não caber numa leitura só."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "a IA lendo a fila de documentos"
