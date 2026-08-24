@@ -181,8 +181,10 @@ module.exports = async (req, res) => {
       const results = [];
       let after = "";
       for (let volta = 0; volta < 20; volta++) { // teto de segurança: 20 × 500 = 10 mil lançamentos
+        // /v2/transactions não aceita pageSize: a página vem sempre fixa em 500, sem essa opção
+        // (a API rejeita a chamada inteira com "property pageSize should not exist" se ela for enviada)
         const d = await chamarPluggy(apiKey, "GET", "/v2/transactions", {
-          accountId, dateFrom: from, dateTo: to, after: after || undefined, pageSize: 500,
+          accountId, dateFrom: from, dateTo: to, after: after || undefined,
         });
         results.push(...(d.results || []));
         if (!d.next) break;
