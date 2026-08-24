@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.28 · compilado em 2026-08-24T18:02:55.741Z */
+   Versão 1.2.31 · compilado em 2026-08-24T18:50:27.872Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.28";
+const APP_VERSION = "1.2.31";
 const APP_BUILD = "2026-08-24";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -1726,12 +1726,53 @@ function matchPluggyAccount(c, accounts) {
     via: "nome",
     keys
   };
-  const chute = accounts.find(a => a.kind === kind);
+  // sem casamento nenhum: NÃO chuta uma conta qualquer do mesmo tipo (podia ser a conta errada, de
+  // outro banco) — quem chama decide criar uma conta nova pra essa conexão (ver garantirContasPluggy)
   return {
-    id: chute ? chute.id : "",
+    id: "",
     auto: false,
-    via: "chute",
+    via: "nova",
     keys
+  };
+}
+
+/* garante que toda conta do Pluggy que não casou com nenhuma cadastrada ganhe uma conta nova aqui —
+   com o nome do banco, cor da paleta e a impressão digital já preenchida (então casa sozinha nas
+   próximas sincronizações, sem precisar mais deste passo). Devolve a lista de contas já com as novas
+   incluídas, pronta para mapPluggyDocs, e separadamente só as que foram criadas agora (para avisar). */
+const CONTA_COLORS = ["#3B63C4", "#E05A2B", "#12805F", "#C2382F", "#B87C10", "#A57BE0", "#46B7C7", "#8C93A8"];
+function nomeContaAutomatica(c, connectorName, existentes) {
+  const rotulo = PLUGGY_SUBTIPO[c.subtype] || (pluggyKind(c) === "cartao" ? "Cartão de crédito" : "Conta");
+  const base = pluggyKind(c) === "cartao" ? `${connectorName} Cartão` : connectorName;
+  const usados = new Set(existentes.map(a => a.name.trim().toLowerCase()));
+  if (!usados.has(base.trim().toLowerCase())) return base;
+  const comRotulo = `${base} (${rotulo})`;
+  if (!usados.has(comRotulo.trim().toLowerCase())) return comRotulo;
+  let n = 2;
+  while (usados.has(`${base} (${n})`.toLowerCase())) n++;
+  return `${base} (${n})`;
+}
+function garantirContasPluggy(contas, accountsAtuais, connectorName) {
+  const novas = [];
+  let atual = accountsAtuais;
+  contas.forEach(c => {
+    const achou = matchPluggyAccount(c, atual);
+    if (achou.id) return;
+    const nova = {
+      id: uid(),
+      name: nomeContaAutomatica(c, connectorName, atual),
+      kind: pluggyKind(c),
+      color: CONTA_COLORS[atual.length % CONTA_COLORS.length],
+      openingBalance: 0,
+      openingDate: "",
+      matchKeys: achou.keys
+    };
+    novas.push(nova);
+    atual = [...atual, nova];
+  });
+  return {
+    accounts: atual,
+    novas
   };
 }
 
@@ -1776,14 +1817,23 @@ function mapPluggyDocs({
   accounts,
   categoryMemory,
   conexao,
-  jaImportados
+  jaImportados,
+  criadasAgora
 }) {
   const conhecidos = jaImportados instanceof Set ? jaImportados : new Set();
+  const novasNesteLote = criadasAgora instanceof Set ? criadasAgora : new Set();
   let ignorados = 0;
-  const resolvidas = contas.map(c => ({
-    pluggy: c,
-    ...matchPluggyAccount(c, accounts)
-  }));
+  // a conta recém-criada por garantirContasPluggy já casa por número aqui dentro (a impressão digital
+  // foi preenchida na hora de criar) — só que "reconhecida pelo número" soaria estranho pra uma conta
+  // que não existia há 2 segundos, então essa marca vira "nova" mesmo com o casamento por fingerprint
+  const resolvidas = contas.map(c => {
+    const r = {
+      pluggy: c,
+      ...matchPluggyAccount(c, accounts)
+    };
+    if (novasNesteLote.has(r.id)) r.via = "nova";
+    return r;
+  });
   // números das próprias contas conectadas, para achar o outro lado de uma transferência interna
   const proprias = resolvidas.filter(r => r.id && soDigitos(r.pluggy.number).length >= 4).map(r => ({
     acctId: r.id,
@@ -2094,24 +2144,37 @@ const sameInstant = (a, b) => {
   return !isNaN(ta) && !isNaN(tb) && ta === tb;
 };
 /* saveData verifica conflito (updated_at mais novo no servidor do que o esperado) antes de gravar,
-   a menos que force=true. Lança em qualquer falha real, para o chamador tratar/tentar de novo. */
+   a menos que force=true. Lança em qualquer falha real, para o chamador tratar/tentar de novo.
+
+   A checagem de conflito e a gravação são UMA operação só (UPDATE ... WHERE updated_at = esperado),
+   não duas separadas (antes: SELECT pra conferir, DEPOIS UPSERT pra gravar). Com duas operações
+   separadas, numa conexão lenta ou instável uma gravação atrasada podia passar pela checagem antes de
+   outra terminar, e só efetivamente gravar DEPOIS — sobrescrevendo por cima em silêncio, sem conflito
+   nenhum detectado (a checagem já tinha passado). Com o UPDATE condicional, o próprio Postgres só
+   grava se o updated_at ainda for exatamente o esperado NAQUELE instante — sem essa janela aberta
+   entre conferir e gravar. Se não bater (0 linhas afetadas), é conflito de verdade. */
 async function saveData(userId, data, expectedUpdatedAt, force) {
   if (sb && userId) {
+    const nowIso = new Date().toISOString();
     if (expectedUpdatedAt && !force) {
       const {
-        data: row,
-        error: checkErr
-      } = await sb.from("finance_data").select("updated_at").eq("user_id", userId).maybeSingle();
-      if (checkErr) throw checkErr;
-      if (row && row.updated_at && !sameInstant(row.updated_at, expectedUpdatedAt)) {
-        return {
-          conflict: true
-        };
-      }
+        data: saved,
+        error
+      } = await sb.from("finance_data").update({
+        data,
+        updated_at: nowIso
+      }).eq("user_id", userId).eq("updated_at", expectedUpdatedAt).select("updated_at").maybeSingle();
+      if (error) throw error;
+      if (!saved) return {
+        conflict: true
+      }; // 0 linhas batidas: outra gravação já mudou o updated_at no meio do caminho
+      return {
+        conflict: false,
+        updatedAt: saved.updated_at
+      };
     }
-    const nowIso = new Date().toISOString();
     // pede de volta o updated_at tal como o Postgres o armazenou, para as próximas comparações
-    // partirem do mesmo formato (evita o falso conflito descrito acima já na origem)
+    // partirem do mesmo formato (evita falso conflito na comparação seguinte)
     const {
       data: saved,
       error
@@ -4118,7 +4181,7 @@ function App() {
     }));
     setResetConfirmText("");
     setSettingsOpen(false);
-    toast("Transações, contas e cartões apagados. Cadastre as contas de novo antes da próxima importação.", "success");
+    toast("Transações, contas e cartões apagados. Se você usa Open Finance, a próxima sincronização recria as contas sozinha.", "success");
   }
   function importData(e) {
     const f = e.target.files?.[0];
@@ -9352,6 +9415,20 @@ function OpenFinance({
         itemId: conexao.id
       });
       if (contas.length === 0) throw new Error("O banco não devolveu nenhuma conta nesta conexão.");
+
+      // conta/cartão que essa conexão precisa e ainda não existe (nem por número, nem por nome) é
+      // criado aqui, sozinho — sem isso, a pessoa teria que cadastrar cada conta na mão antes de
+      // importar, o que contradiz a ideia de "conectar e pronto" do Open Finance
+      const {
+        accounts: accountsComNovas,
+        novas
+      } = garantirContasPluggy(contas, accounts, conexao.connectorName);
+      if (novas.length) {
+        update(d => ({
+          accounts: [...d.accounts, ...novas]
+        }));
+        toast(`${novas.length === 1 ? "Conta criada" : "Contas criadas"} automaticamente: ${novas.map(a => a.name).join(", ")}.`, "success");
+      }
       const from = desdeQuando(conexao),
         to = todayISO();
       const txPorConta = {};
@@ -9375,9 +9452,10 @@ function OpenFinance({
       } = mapPluggyDocs({
         contas,
         txPorConta,
-        accounts,
+        accounts: accountsComNovas,
         categoryMemory,
         jaImportados,
+        criadasAgora: new Set(novas.map(a => a.id)),
         conexao: {
           id: conexao.id,
           connectorName: conexao.connectorName
@@ -10675,7 +10753,14 @@ function Extrato({
         marginBottom: 8,
         color: "var(--pos)"
       }
-    }, "Conta reconhecida pelo número, não pelo nome — este banco já foi importado antes."), doc.meta?.fonte === "pluggy" && /*#__PURE__*/React.createElement("p", {
+    }, "Conta reconhecida pelo número, não pelo nome — este banco já foi importado antes."), doc.meta?.contaVia === "nova" && /*#__PURE__*/React.createElement("p", {
+      className: "hint",
+      style: {
+        marginTop: 0,
+        marginBottom: 8,
+        color: "var(--pos)"
+      }
+    }, "Conta criada automaticamente para esta conexão. Pode renomear em Contas quando quiser."), doc.meta?.fonte === "pluggy" && /*#__PURE__*/React.createElement("p", {
       className: "hint",
       style: {
         marginTop: 0,
@@ -11793,7 +11878,7 @@ function Ajuda({
     n: 8,
     title: "Importar do banco",
     purpose: "Fechar o mês inteiro de uma vez: conecte o banco pelo Open Finance ou jogue aqui todos os documentos dos seus bancos, cartões e corretora — a IA lê, identifica e classifica tudo.",
-    steps: ["Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.", "Se os seus bancos já estão conectados no Meu Pluggy (meu.pluggy.ai), use \"Já uso o Meu Pluggy\": cole o itemId de cada conexão e pronto, sem passar pela tela de conectar de novo. O app confere o id antes de guardar. Vale lembrar que o itemId precisa ter sido criado pela mesma aplicação do Pluggy configurada no servidor.", "Atualizar duas vezes no mesmo mês não duplica nada: cada lançamento importado guarda o id que tem no Pluggy, e o que já entrou é ignorado na busca seguinte — o app avisa quantos ficaram de fora.", "Conectado o banco, o resto da tela continua valendo para o que o Open Finance não cobre: notas de corretagem, recibos, prints e bancos que você não quer conectar.", "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.", "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.", "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
+    steps: ["Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.", "A conta e o cartão de cada banco conectado são criados sozinhos na primeira sincronização — não precisa cadastrar nada em Contas antes. Nas sincronizações seguintes, o app reconhece o mesmo banco pelo número da conta/cartão, sem criar duplicata.", "Se os seus bancos já estão conectados no Meu Pluggy (meu.pluggy.ai), use \"Já uso o Meu Pluggy\": cole o itemId de cada conexão e pronto, sem passar pela tela de conectar de novo. O app confere o id antes de guardar. Vale lembrar que o itemId precisa ter sido criado pela mesma aplicação do Pluggy configurada no servidor.", "Atualizar duas vezes no mesmo mês não duplica nada: cada lançamento importado guarda o id que tem no Pluggy, e o que já entrou é ignorado na busca seguinte — o app avisa quantos ficaram de fora.", "Conectado o banco, o resto da tela continua valendo para o que o Open Finance não cobre: notas de corretagem, recibos, prints e bancos que você não quer conectar.", "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.", "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.", "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
     tip: "Se a IA estiver fora do ar ou sem cota, o PDF ainda é lido localmente pelo leitor embutido (só reconhece gasto e ganho, sem identificar banco nem transferência). Em Configurações dá para trocar o motor de IA entre Rápido e Cuidadoso — vale mudar para Cuidadoso quando alguma fatura vier com muitas linhas erradas. Arquivos acima de 3 MB podem não caber numa leitura só."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "a IA lendo a fila de documentos"
