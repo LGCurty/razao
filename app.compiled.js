@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.26 · compilado em 2026-08-23T20:38:27.775Z */
+   Versão 1.2.28 · compilado em 2026-08-24T18:02:55.741Z */
 const {
   useState,
   useEffect,
@@ -22,8 +22,8 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.26";
-const APP_BUILD = "2026-08-23";
+const APP_VERSION = "1.2.28";
+const APP_BUILD = "2026-08-24";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
 const configured = SUPABASE_URL.startsWith("https://") && !SUPABASE_URL.includes("SEU-PROJETO") && SUPABASE_ANON_KEY.length > 20 && !SUPABASE_ANON_KEY.includes("SUA-CHAVE");
@@ -4105,6 +4105,21 @@ function App() {
   const [importPreview, setImportPreview] = useState(null); // {incoming:{...contagens},current:{...contagens},raw}
   const [importMode, setImportMode] = useState("merge"); // merge|replace
   const [replaceConfirmText, setReplaceConfirmText] = useState("");
+  const [resetConfirmText, setResetConfirmText] = useState("");
+  // zera transações, contas e cartões pra recomeçar do zero (ex: depois de ligar o Open Finance,
+  // sem lançamento de teste ou duplicado misturado com o que chega automático do banco). As conexões
+  // do Open Finance (pluggy.items) NÃO são tocadas — senão a pessoa teria que revincular tudo nos
+  // dashboards do Pluggy de novo. Metas, orçamentos e categorização aprendida também ficam de fora,
+  // por não serem o que foi pedido.
+  function resetFinanceiro() {
+    update(d => ({
+      transactions: [],
+      accounts: []
+    }));
+    setResetConfirmText("");
+    setSettingsOpen(false);
+    toast("Transações, contas e cartões apagados. Cadastre as contas de novo antes da próxima importação.", "success");
+  }
   function importData(e) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -4691,7 +4706,45 @@ function App() {
     size: 14
   }), " Instalar a versão nova") : /*#__PURE__*/React.createElement("div", {
     className: "hint"
-  }, "Você está na versão mais recente que este aparelho baixou. Quando sair uma nova, um aviso aparece aqui e no topo da tela.")), /*#__PURE__*/React.createElement(Sheet, {
+  }, "Você está na versão mais recente que este aparelho baixou. Quando sair uma nova, um aviso aparece aqui e no topo da tela."), /*#__PURE__*/React.createElement("div", {
+    className: "sheetdivider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 6,
+      color: "var(--neg)"
+    }
+  }, "Zona de risco"), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 0
+    }
+  }, "Apaga todas as transações, contas e cartões cadastrados — útil para começar do zero depois de ligar o Open Finance, sem lançamento de teste misturado com o que chega automático do banco. As conexões do Open Finance continuam vinculadas (não precisa reconectar no Pluggy), e metas, orçamentos e categorização aprendida não são afetados. Isso não pode ser desfeito por aqui — vale ", /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "saveretry",
+    style: {
+      fontSize: "inherit"
+    },
+    onClick: () => exportData()
+  }, "exportar um backup"), " antes."), /*#__PURE__*/React.createElement("input", {
+    className: "fld",
+    value: resetConfirmText,
+    onChange: e => setResetConfirmText(e.target.value),
+    placeholder: "Digite \"apagar\"",
+    style: {
+      margin: "10px 0 4px"
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "sbtn danger",
+    style: {
+      marginTop: 6
+    },
+    disabled: resetConfirmText.trim().toLowerCase() !== "apagar",
+    onClick: resetFinanceiro
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "excluir",
+    size: 14
+  }), " Apagar transações, contas e cartões")), /*#__PURE__*/React.createElement(Sheet, {
     open: sheetOpen,
     onClose: () => setSheetOpen(false),
     title: sheetEditTx ? "Editar lançamento" : "Novo lançamento",
