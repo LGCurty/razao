@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.31 · compilado em 2026-08-24T18:50:27.872Z */
+   Versão 1.2.35 · compilado em 2026-08-24T19:13:09.176Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.31";
+const APP_VERSION = "1.2.35";
 const APP_BUILD = "2026-08-24";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -1743,7 +1743,13 @@ function matchPluggyAccount(c, accounts) {
 const CONTA_COLORS = ["#3B63C4", "#E05A2B", "#12805F", "#C2382F", "#B87C10", "#A57BE0", "#46B7C7", "#8C93A8"];
 function nomeContaAutomatica(c, connectorName, existentes) {
   const rotulo = PLUGGY_SUBTIPO[c.subtype] || (pluggyKind(c) === "cartao" ? "Cartão de crédito" : "Conta");
-  const base = pluggyKind(c) === "cartao" ? `${connectorName} Cartão` : connectorName;
+  // o nome de marketing da PRÓPRIA conta/cartão (ex: "Banco Santander", "SANTANDER ELITE VISA")
+  // identifica o banco de verdade mesmo quando o conector da conexão é genérico — é exatamente o caso
+  // de quem vincula pelo Meu Pluggy: ali várias contas de bancos diferentes vêm todas sob um único
+  // conector chamado "MeuPluggy", então usar connectorName criaria toda conta com esse mesmo nome
+  const marketing = String(c?.marketingName || "").trim();
+  const nomeProprio = String(c?.name || "").trim();
+  const base = marketing || (pluggyKind(c) === "cartao" ? `${connectorName} Cartão` : connectorName) || nomeProprio || "Conta";
   const usados = new Set(existentes.map(a => a.name.trim().toLowerCase()));
   if (!usados.has(base.trim().toLowerCase())) return base;
   const comRotulo = `${base} (${rotulo})`;
@@ -1954,7 +1960,7 @@ function mapPluggyDocs({
     const rotulo = PLUGGY_SUBTIPO[c.subtype] || (isCard ? "Cartão de crédito" : "Conta");
     docs.push({
       id: docId,
-      name: `${conexao?.connectorName || c.marketingName || "Banco"} · ${c.name || rotulo}`,
+      name: `${c.marketingName || conexao?.connectorName || "Banco"} · ${c.name || rotulo}`,
       size: 0,
       file: null,
       status: "pronto",
@@ -1964,7 +1970,7 @@ function mapPluggyDocs({
       count: rows.filter(x => x.docId === docId).length,
       meta: {
         tipo: isCard ? "fatura" : "extrato",
-        banco: `${conexao?.connectorName || c.marketingName || "Banco"} · ${c.name || rotulo}`,
+        banco: `${c.marketingName || conexao?.connectorName || "Banco"} · ${c.name || rotulo}`,
         contaId: r.id,
         contaAuto: r.auto,
         contaVia: r.via,
@@ -9362,6 +9368,29 @@ function OpenFinance({
   // com o app em modo local não há como provar quem está pedindo os dados do banco, e o servidor
   // recusa — melhor dizer isso antes da pessoa clicar do que deixar o erro aparecer depois
   const podeConectar = configurado === true && logado;
+
+  /* abrir esta aba já atualiza sozinha qualquer conexão "velha" (mais de 20h sem sincronizar), sem
+     precisar clicar em nada — não existe como o app rodar sozinho com a aba fechada (isso pediria um
+     agendamento no servidor, com uma chave de acesso bem mais privilegiada, e passaria por cima da
+     revisão manual). O resultado continua caindo na mesma lista de revisão de sempre. */
+  const autoSincronizouRef = useRef(false);
+  useEffect(() => {
+    if (autoSincronizouRef.current || !podeConectar || conexoes.length === 0 || busy) return;
+    const precisam = conexoes.filter(c => !c.lastSyncAt || (Date.now() - new Date(c.lastSyncAt).getTime()) / 3600000 >= 20);
+    if (precisam.length === 0) return;
+    autoSincronizouRef.current = true; // marca já, antes do atraso: evita disparar de novo enquanto espera
+    // uma conexão que acabou de nascer (lastSyncAt vazio) pode ainda estar com o banco terminando de
+    // mandar os dados para o Pluggy — um respiro curto evita um "o banco não devolveu nenhuma conta" falso
+    const t = setTimeout(() => {
+      (async () => {
+        for (const c of precisam) {
+          if (!vivo.current) return;
+          await sincronizar(c);
+        }
+      })();
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [podeConectar, conexoes.length, busy]);
   function desdeQuando(conexao) {
     const hoje = new Date();
     const dias = periodo === "auto" ? conexao?.lastSyncAt ? Math.max(7, Math.ceil((hoje - new Date(conexao.lastSyncAt)) / 86400000) + 5) : 90 : Number(periodo);
@@ -9536,10 +9565,9 @@ function OpenFinance({
             }
           }));
           toast(`${nova.connectorName} conectado. Buscando os lançamentos…`, "success");
-          // o banco ainda pode estar enviando os dados nos primeiros segundos
-          setTimeout(() => {
-            if (vivo.current) sincronizar(nova);
-          }, 1500);
+          // a busca em si fica por conta do efeito de auto-sincronização (mais abaixo): ele já pega
+          // qualquer conexão sem lastSyncAt — não dá pra também chamar sincronizar() aqui, ou as duas
+          // chamadas disparam quase juntas e uma reconstrói a revisão embaixo dos pés da outra
         },
         onError: e => {
           if (vivo.current) setErro(e?.message || "O banco recusou a conexão. Tente de novo.");
@@ -11878,7 +11906,7 @@ function Ajuda({
     n: 8,
     title: "Importar do banco",
     purpose: "Fechar o mês inteiro de uma vez: conecte o banco pelo Open Finance ou jogue aqui todos os documentos dos seus bancos, cartões e corretora — a IA lê, identifica e classifica tudo.",
-    steps: ["Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.", "A conta e o cartão de cada banco conectado são criados sozinhos na primeira sincronização — não precisa cadastrar nada em Contas antes. Nas sincronizações seguintes, o app reconhece o mesmo banco pelo número da conta/cartão, sem criar duplicata.", "Se os seus bancos já estão conectados no Meu Pluggy (meu.pluggy.ai), use \"Já uso o Meu Pluggy\": cole o itemId de cada conexão e pronto, sem passar pela tela de conectar de novo. O app confere o id antes de guardar. Vale lembrar que o itemId precisa ter sido criado pela mesma aplicação do Pluggy configurada no servidor.", "Atualizar duas vezes no mesmo mês não duplica nada: cada lançamento importado guarda o id que tem no Pluggy, e o que já entrou é ignorado na busca seguinte — o app avisa quantos ficaram de fora.", "Conectado o banco, o resto da tela continua valendo para o que o Open Finance não cobre: notas de corretagem, recibos, prints e bancos que você não quer conectar.", "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.", "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.", "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
+    steps: ["Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.", "A conta e o cartão de cada banco conectado são criados sozinhos na primeira sincronização — não precisa cadastrar nada em Contas antes. Nas sincronizações seguintes, o app reconhece o mesmo banco pelo número da conta/cartão, sem criar duplicata.", "Não precisa lembrar de clicar em Atualizar: toda vez que você abre esta aba, qualquer conexão sem sincronizar há mais de 20 horas atualiza sozinha. Isso só acontece com a aba aberta — o app não roda em segundo plano com o celular fechado, e nada é importado sem passar pela sua revisão.", "Se os seus bancos já estão conectados no Meu Pluggy (meu.pluggy.ai), use \"Já uso o Meu Pluggy\": cole o itemId de cada conexão e pronto, sem passar pela tela de conectar de novo. O app confere o id antes de guardar. Vale lembrar que o itemId precisa ter sido criado pela mesma aplicação do Pluggy configurada no servidor.", "Atualizar duas vezes no mesmo mês não duplica nada: cada lançamento importado guarda o id que tem no Pluggy, e o que já entrou é ignorado na busca seguinte — o app avisa quantos ficaram de fora.", "Conectado o banco, o resto da tela continua valendo para o que o Open Finance não cobre: notas de corretagem, recibos, prints e bancos que você não quer conectar.", "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.", "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.", "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
     tip: "Se a IA estiver fora do ar ou sem cota, o PDF ainda é lido localmente pelo leitor embutido (só reconhece gasto e ganho, sem identificar banco nem transferência). Em Configurações dá para trocar o motor de IA entre Rápido e Cuidadoso — vale mudar para Cuidadoso quando alguma fatura vier com muitas linhas erradas. Arquivos acima de 3 MB podem não caber numa leitura só."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "a IA lendo a fila de documentos"
