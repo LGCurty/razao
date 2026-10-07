@@ -4,17 +4,19 @@ import { ProgressBar } from "../common/Charts";
 import { toast } from "../common/Feedback";
 import { Icon } from "../common/Icon";
 import { Money } from "../common/Input";
+import { Sheet } from "../common/Modal";
 import { StatusDot } from "../common/StatusDot";
 import { HelpIcon } from "../help/HelpIcon";
+import { goToTab } from "../navigation/navEvents";
 import { CATS, CAT_HINT, CAT_ICON } from "../../domain/categories";
 import { isRealized } from "../../domain/types";
 import { notificarAparelho } from "../../services/notificationService";
 import { txEffectiveMonth } from "../../utils/calculations";
 import { monthKey } from "../../utils/dates";
-import { brl, capFirst } from "../../utils/formatters";
+import { brl, capFirst, fmtDateBR } from "../../utils/formatters";
 
 /* ---------- ORÇAMENTO ---------- */
-function Orcamento({ budgetFiltro, onBudgetFiltro, budgetRows, budgets, budgetExceptions, update, plannedTotal, totalSpent, monthLabel, txs, view, accounts, budgetNotify }){
+function Orcamento({ onOpenTx, budgetFiltro, onBudgetFiltro, budgetRows, budgets, budgetExceptions, update, plannedTotal, totalSpent, monthLabel, txs, view, accounts, budgetNotify }){
   const allCats=CATS.gasto.map(c=>c[0]);
   const vKey=`${view.getFullYear()}-${String(view.getMonth()+1).padStart(2,"0")}`;
 
@@ -30,6 +32,12 @@ function Orcamento({ budgetFiltro, onBudgetFiltro, budgetRows, budgets, budgetEx
   };
   // "Editar orçamentos": todas as categorias de uma vez, valendo para todos os meses (padrão) ou só para o mês aberto
   const [editando,setEditando]=useState(false);
+  // ficha da categoria: toque no nome da categoria na tabela
+  const [fichaCat,setFichaCat]=useState(null);
+  const fichaRow = fichaCat ? budgetRows.find(r=>r.cat===fichaCat) : null;
+  const fichaTxs = useMemo(()=>!fichaCat ? [] : txs
+    .filter(t=>t.type==="gasto" && t.category===fichaCat && isRealized(t) && txEffectiveMonth(t,accounts)===vKey)
+    .sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:0),[fichaCat,txs,accounts,vKey]);
   // filtro escolhido no menu lateral ou nos botões acima da tabela
   const linhasVisiveis = budgetFiltro ? budgetRows.filter(r=>r.status===budgetFiltro) : budgetRows;
   const [escopo,setEscopo]=useState("default");
@@ -189,9 +197,9 @@ function Orcamento({ budgetFiltro, onBudgetFiltro, budgetRows, budgets, budgetEx
                   {linhasVisiveis.map(r=>{
                     const rollover=r.limit>0?r.limit-(prevSpentByCat[r.cat]||0):0;
                     return (
-                      <div className="budtrwrap" key={r.cat} role="rowgroup">
+                      <div className={"budtrwrap st-"+r.status} key={r.cat} role="rowgroup">
                         <div className="budtr" role="row">
-                          <span className="bname" role="cell"><Icon name={CAT_ICON[r.cat]||"outros"} size={15}/> {r.cat}</span>
+                          <span className="bname" role="cell"><button type="button" className="bopen" onClick={()=>setFichaCat(r.cat)} aria-label={`Ver detalhes de ${r.cat}`}><Icon name={CAT_ICON[r.cat]||"outros"} size={15}/> {r.cat}<Icon name="seta-direita" size={13}/></button></span>
                           <span className="num" role="cell" data-l="Orçado">{r.limit>0?brl(r.limit):"—"}</span>
                           <span className="num" role="cell" data-l="Gasto">{brl(r.spent)}</span>
                           <span className="num" role="cell" data-l="%">{r.limit>0?`${Math.round(r.pct*100)}%`:"—"}</span>
@@ -268,6 +276,51 @@ function Orcamento({ budgetFiltro, onBudgetFiltro, budgetRows, budgets, budgetEx
               </div>
             </React.Fragment>}
       </div>
+
+      <Sheet open={!!fichaRow} onClose={()=>setFichaCat(null)} title={fichaRow?`${fichaRow.cat} · ${monthLabel}`:""}>
+        {fichaRow &&
+          <div className="mvsheet">
+            <div className="mvhead">
+              <span className={"mvic "+(fichaRow.status==="over"?"out":fichaRow.status==="warn"?"warnic":"in")}><Icon name={CAT_ICON[fichaRow.cat]||"outros"} size={20}/></span>
+              <div className="mvtitle"><b>{fichaRow.cat}</b><span className="mono">{CAT_HINT[fichaRow.cat]||"Orçamento do mês"}</span></div>
+            </div>
+            <div className={"mvstatus "+(fichaRow.status==="over"?"out":fichaRow.status==="warn"?"warn":fichaRow.status==="ok"?"in":"")}>
+              <div>
+                <div className="mvlabel">Gasto em {monthLabel}</div>
+                <div className="mvvalor num">{brl(fichaRow.spent)}</div>
+              </div>
+              <StatusDot status={fichaRow.status}/>
+            </div>
+            <div className="mvboxes">
+              <div className="mvbox"><small>Orçado</small><b>{fichaRow.limit>0?brl(fichaRow.limit):"Sem limite"}</b></div>
+              <div className="mvbox"><small>{fichaRow.limit>0 && fichaRow.spent>fichaRow.limit?"Passou do limite":"Disponível"}</small>
+                <b style={{color:fichaRow.limit>0&&fichaRow.spent>fichaRow.limit?"var(--neg)":undefined}}>{fichaRow.limit>0?brl(Math.abs(fichaRow.limit-fichaRow.spent)):"—"}</b></div>
+            </div>
+            {fichaRow.limit>0 && <ProgressBar spent={fichaRow.spent} limit={fichaRow.limit} status={fichaRow.status}/>}
+            <div className="mvspecs">
+              <div className="mvspecstitle">Histórico mensal</div>
+              <div className="mvspec"><span>Mínimo</span><b>{fichaRow.hist?brl(fichaRow.hist.min):"—"}</b></div>
+              <div className="mvspec"><span>Média</span><b>{fichaRow.hist?brl(fichaRow.hist.avg):"—"}</b></div>
+              <div className="mvspec"><span>Máximo</span><b>{fichaRow.hist?brl(fichaRow.hist.max):"—"}</b></div>
+              <div className="mvspec"><span>% do limite</span><b>{fichaRow.limit>0?`${Math.round(fichaRow.pct*100)}%`:"—"}</b></div>
+            </div>
+            <div>
+              <div className="mvspecstitle">Lançamentos em {monthLabel} ({fichaTxs.length})</div>
+              {fichaTxs.length===0 && <p className="hint">Nenhum gasto nesta categoria no mês.</p>}
+              {fichaTxs.slice(0,8).map(t=>(
+                <button type="button" key={t.id} className="catmov" onClick={()=>{ setFichaCat(null); if(onOpenTx) setTimeout(()=>onOpenTx(t),60); }}>
+                  <span className="mono">{fmtDateBR(t.date).slice(0,5)}</span>
+                  <b>{t.description||t.category}</b>
+                  <span className="num">{brl(t.cents)}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mvacts">
+              <button className="sbtn" onClick={()=>{ const c=fichaRow.cat; setFichaCat(null); goToTab("balanco",{category:c}); }}><Icon name="filtro" size={15}/> Ver lançamentos</button>
+              <button className="sbtn" onClick={()=>{ setFichaCat(null); abrirEditor(); }}><Icon name="editar" size={15}/> Editar limites</button>
+            </div>
+          </div>}
+      </Sheet>
     </React.Fragment>
   );
 }

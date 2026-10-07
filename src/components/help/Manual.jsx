@@ -417,6 +417,9 @@ function Ajuda({ helpTarget, onConsumeTarget }){
             steps={[
               "Em Gastos, digite na busca por descrição ou por #tag — o resultado aparece enquanto você digita.",
               "Abra Filtros pra combinar conta, tipo, categoria, tags, intervalo de datas, status (previsto/realizado) e faixa de valor.",
+              "Toque em qualquer lançamento para abrir a ficha completa (conta, banco, forma de pagamento, mês da fatura, parcela, origem) com Editar, Duplicar, Marcar como pago e Excluir — com \"Desfazer\" por alguns segundos.",
+              "Lista ou Cartões: o botão acima dos lançamentos troca a lista por dia por uma grade de cartões (faixa colorida pelo tipo, \"PREVISTO\" em âmbar), que dá para ordenar por data ou por maior valor. A escolha fica guardada no aparelho.",
+              "No Orçamento, toque no nome de uma categoria para ver a ficha dela: gasto, limite, quanto ainda dá para gastar, histórico e os lançamentos do mês.",
               "Cada filtro ativo vira um chip removível; \"Limpar tudo\" reseta de uma vez.",
               "Clicar numa categoria no gráfico, ou numa tag na lista, também aplica o filtro correspondente.",
             ]}

@@ -567,6 +567,9 @@
 .rz .recentlist{display:flex;flex-direction:column}
 .rz .recentrow{display:grid;grid-template-columns:44px 1fr auto;grid-template-areas:"d c v" "d m m";column-gap:10px;row-gap:2px;padding:9px 0;border-bottom:1px solid var(--surface-2);align-items:center}
 .rz .recentrow:last-child{border-bottom:none}
+.rz button.recentrow{width:100%;background:none;border:none;border-bottom:1px solid var(--surface-2);color:inherit;font:inherit;text-align:left;cursor:pointer;min-height:48px;border-radius:0}
+.rz button.recentrow:last-child{border-bottom:none}
+.rz button.recentrow:hover{background:var(--surface-2)}
 .rz .recentrow .rdate{grid-area:d;font-size:12px;color:var(--text-mut)}
 .rz .recentrow .rcat{grid-area:c;font-size:13px;font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rz .recentrow .rcat small{display:inline;margin-left:6px;font-size:11px;font-weight:400;color:var(--text-mut)}
@@ -689,4 +692,93 @@
 @media (max-width:420px){
   .rz .bval{white-space:normal;text-align:right;min-width:0}
   .rz .bval>span{white-space:nowrap;display:inline-block}
+}
+
+/* ===================== lançamentos: barra de visualização e cartões (estilo Sentinel) ===================== */
+.rz .listbar{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:-4px}
+.rz .listcount{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-mut);margin-right:auto}
+.rz .seg.mini{margin:0;gap:4px;padding:3px;border:1px solid var(--hairline);border-radius:11px;background:var(--surface)}
+.rz .seg.mini button{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;border:none;background:transparent;padding:0 12px;min-height:36px;border-radius:8px;font-size:12.5px}
+.rz .seg.mini button.on{background:var(--accent-bg);color:var(--accent)}
+.rz .tx.clicavel{cursor:pointer}
+.rz .tx.clicavel:hover{border-color:color-mix(in srgb, var(--accent) 45%, var(--hairline))}
+.rz .txgrid{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media (min-width:640px){.rz .txgrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (min-width:1024px){.rz .txgrid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}}
+.rz .txcard{--tc:var(--text-mut);position:relative;display:flex;flex-direction:column;gap:5px;text-align:left;min-width:0;min-height:132px;padding:14px 12px 12px;
+  border:1px solid var(--hairline);border-radius:13px;background:var(--surface);color:var(--text);font:inherit;cursor:pointer;overflow:hidden;box-shadow:var(--shadow-card);transition:border-color .12s,transform .12s}
+.rz .txcard::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--tc)}
+.rz .txcard:hover{border-color:var(--tc)}
+.rz .txcard:active{transform:scale(.985)}
+.rz .txcard.out{--tc:var(--neg)}.rz .txcard.in{--tc:var(--pos)}.rz .txcard.inv{--tc:var(--inv)}.rz .txcard.trf{--tc:var(--trf)}.rz .txcard.warn{--tc:var(--warn)}
+.rz .tcrow{display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0}
+.rz .tccat{font-size:10px;letter-spacing:.06em;color:var(--text-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rz .tcbadge{flex:0 0 auto;font-size:9px;font-weight:700;letter-spacing:.06em;padding:3px 6px;border-radius:6px}
+.rz .tcbadge.out{background:var(--neg-bg);color:var(--neg)}.rz .tcbadge.in{background:var(--pos-bg);color:var(--pos)}
+.rz .tcbadge.inv{background:var(--inv-bg);color:var(--inv)}.rz .tcbadge.trf{background:var(--trf-bg);color:var(--trf)}
+.rz .tcbadge.warn{background:var(--warn);color:#1F2328}
+.rz .tcdesc{font-size:14px;font-weight:600;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.rz .tcmeta{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.rz .tcmeta svg{flex:0 0 auto;color:var(--tc)}
+.rz .tcval{margin-top:auto;padding-top:4px;font-size:15px;font-weight:600}
+.rz .tcval.out{color:var(--neg)}.rz .tcval.in{color:var(--pos)}.rz .tcval.inv{color:var(--inv)}.rz .tcval.trf{color:var(--trf)}
+
+/* ===================== ficha do movimento (estilo da ficha de detalhes do Sentinel) ===================== */
+.rz .mvsheet{display:flex;flex-direction:column;gap:14px}
+.rz .mvhead{display:flex;align-items:center;gap:12px;min-width:0}
+.rz .mvic{flex:0 0 44px;height:44px;border-radius:12px;display:grid;place-items:center}
+.rz .mvic.out{background:var(--neg-bg);color:var(--neg)}.rz .mvic.in{background:var(--pos-bg);color:var(--pos)}
+.rz .mvic.inv{background:var(--inv-bg);color:var(--inv)}.rz .mvic.trf{background:var(--trf-bg);color:var(--trf)}
+.rz .mvtitle{display:flex;flex-direction:column;min-width:0}
+.rz .mvtitle b{font-family:'Sora',sans-serif;font-size:18px;font-weight:700;line-height:1.25;word-break:break-word}
+.rz .mvtitle span{font-size:12px;color:var(--text-mut);margin-top:2px}
+.rz .mvstatus{--st:var(--text-mut);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:14px;
+  border:1px solid color-mix(in srgb, var(--st) 35%, var(--hairline));background:color-mix(in srgb, var(--st) 8%, var(--surface))}
+.rz .mvstatus.out{--st:var(--neg)}.rz .mvstatus.in{--st:var(--pos)}.rz .mvstatus.inv{--st:var(--inv)}.rz .mvstatus.trf{--st:var(--trf)}.rz .mvstatus.warn{--st:var(--warn)}
+.rz .mvlabel{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text-mut)}
+.rz .mvvalor{font-size:26px;font-weight:600;margin-top:4px}
+.rz .mvvalor.out{color:var(--neg)}.rz .mvvalor.in{color:var(--pos)}.rz .mvvalor.inv{color:var(--inv)}.rz .mvvalor.trf{color:var(--trf)}
+.rz .mvbadge{flex:0 0 auto;font-size:11px;font-weight:700;letter-spacing:.06em;padding:7px 10px;border-radius:9px;background:var(--st,var(--surface-2));color:#fff}
+.rz .mvbadge.out{background:var(--neg)}.rz .mvbadge.in{background:var(--pos);color:#0B1A13}.rz .mvbadge.inv{background:var(--inv)}.rz .mvbadge.trf{background:var(--trf);color:#0B1A1D}.rz .mvbadge.warn{background:var(--warn);color:#1F2328}
+.rz .mvboxes{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.rz .mvbox{border:1px solid var(--hairline);border-radius:12px;padding:10px 12px;min-width:0}
+.rz .mvbox small{display:block;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-mut)}
+.rz .mvbox b{display:block;font-size:14px;font-weight:600;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rz .mvspecstitle{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding-bottom:8px;border-bottom:1px solid var(--hairline)}
+.rz .mvspec{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:10px 0;border-bottom:1px solid var(--surface-2);font-size:13px}
+.rz .mvspec span{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-mut);flex:0 0 auto}
+.rz .mvspec b{font-weight:600;text-align:right;min-width:0;word-break:break-word}
+.rz .mvspec b.mono{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500}
+.rz .mvacts{display:grid;grid-template-columns:1fr 1fr;gap:8px;position:sticky;bottom:-1px;background:var(--surface);padding:10px 0 2px}
+.rz .mvacts .sbtn{justify-content:center;min-height:46px;font-size:14px}
+.rz .mvacts .mvpaid{grid-column:1/-1;background:var(--pos-bg);color:var(--pos);border-color:transparent}
+@media (min-width:768px){
+  .rz .mvspecs{display:grid;grid-template-columns:1fr 1fr;column-gap:24px}
+  .rz .mvspecstitle{grid-column:1/-1}
+  .rz .mvacts{grid-template-columns:repeat(4,auto);justify-content:end}
+  .rz .mvacts .mvpaid{grid-column:auto}
+}
+
+/* ===================== orçamento: faixa de status e ficha da categoria ===================== */
+.rz .bopen{display:inline-flex;align-items:center;gap:7px;border:none;background:none;color:inherit;font:inherit;font-weight:500;cursor:pointer;padding:6px 0;min-height:36px;text-align:left}
+.rz .bopen>svg:last-child{color:var(--text-mut);opacity:.7}
+.rz .bopen:hover{color:var(--accent)}
+.rz .mvic.warnic{background:var(--warn-bg);color:var(--warn)}
+.rz .catmov{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;width:100%;min-height:44px;border:none;border-bottom:1px solid var(--surface-2);
+  background:none;color:var(--text);font:inherit;font-size:13px;text-align:left;cursor:pointer;padding:6px 2px}
+.rz .catmov:hover{background:var(--surface-2)}
+.rz .catmov .mono{font-size:11px;color:var(--text-mut)}
+.rz .catmov b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+@media (max-width:640px){
+  /* no celular cada categoria vira um cartão com a faixa de status no topo, como os cartões do Sentinel */
+  .rz .budtrwrap{position:relative;border:1px solid var(--hairline);border-radius:13px;padding:12px 12px 10px;margin-bottom:10px;background:var(--surface);overflow:hidden}
+  .rz .budtrwrap::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--hairline)}
+  .rz .budtrwrap.st-ok::before{background:var(--pos)}
+  .rz .budtrwrap.st-warn::before{background:var(--warn)}
+  .rz .budtrwrap.st-over::before{background:var(--neg)}
+}
+@media (max-width:440px){
+  .rz .listbar{flex-wrap:nowrap}
+  .rz .listbar .segtxt{display:none}
+  .rz .seg.mini button{padding:0 10px}
 }

@@ -15,12 +15,16 @@ import { txEffectiveMonth } from "../../utils/calculations";
 import { monthKey } from "../../utils/dates";
 import { brl, brlNum, extractTags, fmtDateBR, formatHours, shortMonthLabel } from "../../utils/formatters";
 
-function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTotal, alerts, byCatChart, acctName, txs, view, accounts, onSelectMonth, update, isDesktop, onEditMobile, monthIndex, categoryMemory, hourlyWageCents, budgetRows, aiModel, pendingFilter, onConsumePendingFilter }){
+function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTotal, alerts, byCatChart, acctName, txs, view, accounts, onSelectMonth, update, isDesktop, onEditMobile, monthIndex, categoryMemory, hourlyWageCents, budgetRows, aiModel, pendingFilter, onConsumePendingFilter, onOpenTx }){
   // Fase 4: busca + filtros combináveis, unificando também os filtros por clique nos gráficos (categoria/tipo).
   // Passam a valer em todos os meses (não só o exibido) — exceto quando um intervalo de datas é definido.
   const [search,setSearch]=useState("");
   const [filters,setFilters]=useState({accounts:[],types:[],categories:[],tags:[],dateFrom:"",dateTo:"",status:"",valueMin:"",valueMax:""});
   const [filterSheetOpen,setFilterSheetOpen]=useState(false);
+  // lista (agrupada por dia) ou cartões (estilo Sentinel); a escolha fica guardada neste aparelho
+  const [modo,setModoState]=useState(()=>{ try{ return localStorage.getItem("razao_mov_modo")==="cartoes"?"cartoes":"lista"; }catch(e){ return "lista"; } });
+  const setModo=(m)=>{ setModoState(m); try{ localStorage.setItem("razao_mov_modo",m); }catch(e){} };
+  const [ordem,setOrdem]=useState("data"); // cartões: "data" (mais recentes) | "valor" (maiores)
   // filtro chegado de outra aba (ex: clique numa categoria no Panorama) — aplica uma vez e avisa o
   // App pra descartá-lo, senão reabrir o Balanço do zero reaplicaria o mesmo filtro de novo
   useEffect(()=>{
@@ -178,6 +182,8 @@ ${AI_SUMMARY_STYLE}`;
     });
     return out;
   },[baseGrouped,pendingDeleteIds]);
+  // os mesmos itens numa lista só (cartões), na ordem da lista por dia
+  const listaPlana=useMemo(()=>Object.values(displayGrouped).flat(),[displayGrouped]);
   const displayTotals=useMemo(()=>{
     if(pendingDeleteIds.size===0) return totals;
     let { inc, exp, inv, previstoInc, previstoExp, previstoInv } = totals;
@@ -316,6 +322,20 @@ ${AI_SUMMARY_STYLE}`;
           <div className="resultsum">{searchSummary.count} resultado{searchSummary.count!==1?"s":""} encontrado{searchSummary.count!==1?"s":""} · soma: <span className="num">{brl(searchSummary.sum)}</span></div>}
       </div>
 
+      {listaPlana.length>0 &&
+        <div className="listbar">
+          <span className="listcount">{listaPlana.length} {listaPlana.length===1?"item":"itens"}</span>
+          {modo==="cartoes" &&
+            <div className="seg mini" role="group" aria-label="Ordenar">
+              <button className={ordem==="data"?"on":""} aria-pressed={ordem==="data"} onClick={()=>setOrdem("data")}>Recentes</button>
+              <button className={ordem==="valor"?"on":""} aria-pressed={ordem==="valor"} onClick={()=>setOrdem("valor")}>Maior valor</button>
+            </div>}
+          <div className="seg mini" role="group" aria-label="Visualização">
+            <button className={modo==="lista"?"on":""} aria-pressed={modo==="lista"} aria-label="Ver em lista" onClick={()=>setModo("lista")}><Icon name="extrato" size={15}/><span className="segtxt">Lista</span></button>
+            <button className={modo==="cartoes"?"on":""} aria-pressed={modo==="cartoes"} aria-label="Ver em cartões" onClick={()=>setModo("cartoes")}><Icon name="grafico" size={15}/><span className="segtxt">Cartões</span></button>
+          </div>
+        </div>}
+
       <Sheet open={filterSheetOpen} onClose={()=>setFilterSheetOpen(false)} title="Filtros">
         <div className="sub" style={{marginBottom:8}}>Conta</div>
         <div className="chips" style={{marginBottom:18}}>
@@ -379,7 +399,13 @@ ${AI_SUMMARY_STYLE}`;
               action={{label:"Importar extratos e faturas",icon:"brilho",onClick:()=>goToTab("extrato")}}
               secondary={{label:"Ver no manual",onClick:()=>openHelp("registrar-lancamentos")}}/>)}
 
-      {Object.entries(displayGrouped).map(([d,list])=>{
+      {modo==="cartoes" && listaPlana.length>0 &&
+        <div className="txgrid">
+          {(ordem==="valor" ? [...listaPlana].sort((a,b)=>b.cents-a.cents) : listaPlana).map(t=>
+            <TxCard key={t.id} t={t} acc={acctName(t.acctId)} acctName={acctName} accounts={accounts} onOpen={()=>onOpenTx && onOpenTx(t)}/>)}
+        </div>}
+
+      {modo==="lista" && Object.entries(displayGrouped).map(([d,list])=>{
         const dayTotal=list.reduce((s,t)=>s+t.cents*TYPES[t.type].sign,0);
         return (
           <div className="daygroup" key={d}>
@@ -393,7 +419,8 @@ ${AI_SUMMARY_STYLE}`;
               const flowLabel=shifted?shortMonthLabel(new Date(flowMk+"-01T00:00:00")):null;
               return(
               <TxRow key={t.id} t={t} cls={cls} acc={acc} isTrf={isTrf} shifted={shifted} flowLabel={flowLabel} acctName={acctName} hourlyWageCents={hourlyWageCents}
-                onEdit={()=>requestEdit(t)} onDelete={()=>requestDelete(t)} onMarkPaid={()=>markAsPaid(t)} onTagClick={(tg)=>toggleInArray("tags",tg)}/>);})}
+                onEdit={()=>requestEdit(t)} onDelete={()=>requestDelete(t)} onMarkPaid={()=>markAsPaid(t)} onTagClick={(tg)=>toggleInArray("tags",tg)}
+                onOpen={onOpenTx?()=>onOpenTx(t):undefined}/>);})}
           </div>);
       })}
 
@@ -443,7 +470,7 @@ ${AI_SUMMARY_STYLE}`;
 }
 Balanco = React.memo(Balanco); // evita re-renderizar a aba inteira quando o App re-renderiza por motivo alheio (tema, menu, scroll…)
 
-function TxRow({ t, cls, acc, isTrf, shifted, flowLabel, acctName, onEdit, onDelete, onMarkPaid, onTagClick, hourlyWageCents }){
+function TxRow({ t, cls, acc, isTrf, shifted, flowLabel, acctName, onEdit, onDelete, onMarkPaid, onTagClick, hourlyWageCents, onOpen }){
   const [swiped,setSwiped]=useState(false);
   const startX=useRef(null);
   function onTouchStart(e){ startX.current=e.touches[0].clientX; }
@@ -456,8 +483,15 @@ function TxRow({ t, cls, acc, isTrf, shifted, flowLabel, acctName, onEdit, onDel
   const previsto = !isRealized(t);
   const inSeries = t.seriesTotal>1;
   const tags = useMemo(()=>extractTags(t.description),[t.description]);
+  // tocar na linha abre a ficha completa; com as ações reveladas pelo deslize, o toque só as recolhe
+  function onClick(e){
+    if(e.target.closest("button")) return;
+    if(swiped){ setSwiped(false); return; }
+    if(onOpen) onOpen();
+  }
   return (
-    <div className={"tx"+(swiped?" swiped":"")+(previsto?" previsto":"")} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+    <div className={"tx"+(swiped?" swiped":"")+(previsto?" previsto":"")+(onOpen?" clicavel":"")} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}
+      onClick={onClick} {...(onOpen?{role:"button",tabIndex:0,"aria-label":`Ver detalhes: ${t.description||t.category||TYPES[t.type].label}`,onKeyDown:(e)=>{ if((e.key==="Enter"||e.key===" ") && e.target===e.currentTarget){ e.preventDefault(); onOpen(); } }}:{})}>
       <div className={"emo "+cls}><Icon name={isTrf?"transferencia":(CAT_ICON[t.category]||"outros")} size={17}/></div>
       <div className="info">
         <div className="t1">{t.description||(isTrf?"Transferência":t.category)}{previsto && <span className="tag warn" style={{marginLeft:6}}>previsto</span>}</div>
@@ -486,4 +520,25 @@ function TxRow({ t, cls, acc, isTrf, shifted, flowLabel, acctName, onEdit, onDel
   );
 }
 
-export { Balanco, TxRow };
+/* cartão de movimento (estilo dos cartões do OTAMERICA Sentinel): faixa colorida pelo tipo no topo,
+   "PREVISTO" em âmbar quando ainda não aconteceu, categoria, descrição, conta, data e valor. Toque abre a ficha. */
+function TxCard({ t, acc, acctName, onOpen }){
+  const tipo=TYPES[t.type]||TYPES.gasto;
+  const trf=t.type==="transferencia";
+  const previsto=!isRealized(t);
+  const destino=trf ? acctName(t.toAcctId) : null;
+  return (
+    <button type="button" className={"txcard "+(previsto?"warn":tipo.cls)} onClick={onOpen} aria-label={`Ver detalhes: ${t.description||t.category||tipo.label}`}>
+      <span className="tcrow">
+        <span className="tccat mono">{trf ? "TRANSFERÊNCIA" : String(t.category||tipo.label).toUpperCase()}</span>
+        <span className={"tcbadge "+(previsto?"warn":tipo.cls)}>{previsto ? "PREVISTO" : tipo.label.toUpperCase()}</span>
+      </span>
+      <span className="tcdesc">{t.description||(trf?"Transferência":t.category)}</span>
+      <span className="tcmeta"><Icon name={trf?"transferencia":(CAT_ICON[t.category]||"outros")} size={13}/>{trf ? `${acc?.name||"?"} → ${destino?.name||"?"}` : (acc?.name||"Sem conta")}</span>
+      <span className="tcmeta"><Icon name="calendario" size={13}/>{fmtDateBR(t.date)}{t.seriesTotal>1?` · ${(t.seriesIndex||0)+1}/${t.seriesTotal}`:""}</span>
+      <span className={"tcval num "+tipo.cls}>{trf?"↔":tipo.sign>0?"+":"−"} {brlNum(t.cents)}</span>
+    </button>
+  );
+}
+
+export { Balanco, TxRow, TxCard };

@@ -13,7 +13,7 @@ import { TYPES, isRealized, paymentLabel } from "../../domain/types";
 import { cardInvoiceNet, saldosPorConta } from "../../utils/calculations";
 import { brl, brlNum, tempoDesde } from "../../utils/formatters";
 
-function HomeDashboard({ txs, accounts, monthIndex, vKey, monthLabel, totals, budgetRows, pluggy }){
+function HomeDashboard({ txs, accounts, monthIndex, vKey, monthLabel, totals, budgetRows, pluggy, onOpenTx }){
   // quem está logado e o motor de sincronização vêm dos contextos (não descem mais por props)
   const { session } = useAuth();
   const { pluggySync } = useData();
@@ -114,12 +114,12 @@ function HomeDashboard({ txs, accounts, monthIndex, vKey, monthLabel, totals, bu
             const sinal=TYPES[t.type].sign;
             const cor=t.type==="ganho"?"var(--pos)":t.type==="gasto"?"var(--neg)":t.type==="investimento"?"var(--inv)":"var(--trf)";
             return (
-              <div className="recentrow" key={t.id}>
+              <button type="button" className="recentrow" key={t.id} onClick={()=>onOpenTx && onOpenTx(t)} aria-label={`Ver detalhes: ${t.description||t.category||TYPES[t.type].label}`}>
                 <span className="rdate num">{t.date.slice(8,10)}/{t.date.slice(5,7)}</span>
                 <span className="rcat">{t.type==="transferencia"?"Transferência":(t.category||TYPES[t.type].label)}<small>{t.description||""}</small></span>
                 <span className="rval num" style={{color:cor}}>{sinal>0?"+":sinal<0?"−":"↔"} {brlNum(t.cents)}</span>
                 <span className="rmeta">{paymentLabel(t, accounts)} · {nomeConta(t.acctId)}</span>
-              </div>);
+              </button>);
           })}
         </div>
       </div>

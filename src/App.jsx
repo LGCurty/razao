@@ -23,6 +23,7 @@ import { Investimentos } from "./components/investments/Investments";
 import { Extrato } from "./components/movements/ImportStatement";
 import { Balanco } from "./components/movements/MovementList";
 import { TransactionForm } from "./components/movements/NewMovementForm";
+import { MovementSheet, useMovementActions } from "./components/movements/MovementSheet";
 import { setHelpListener, setTabListener } from "./components/navigation/navEvents";
 import { NAV_SECTIONS, VIEW_TITLES, sectionOfView } from "./components/navigation/sections";
 import { GlobalSearch } from "./components/navigation/GlobalSearch";
@@ -125,6 +126,9 @@ function App(){
   const fabDeskRef=useRef(null);
   function openAdd(){ setSheetEditTx(null); setSheetPropagateIds([]); setSheetOpen(true); }
   function openEditMobile(t,propagateIds){ setSheetEditTx(t); setSheetPropagateIds(propagateIds||[]); setSheetOpen(true); }
+  // ficha de detalhes de um movimento (lista, cartões, busca, histórico da Home)
+  const [fichaId,setFichaId]=useState(null);
+  const abrirFicha=(t)=>setFichaId(t ? t.id : null);
 
   const fileRef=useRef(null);
   const saveTimer=useRef(null);
@@ -353,6 +357,8 @@ function App(){
     if(offlineReadOnly){ toast("Sem conexão — modo somente leitura. Esta alteração não foi salva.","error"); return; }
     setData(d=>({ ...d, ...(typeof patch==="function"?patch(d):patch) }));
   };
+  // ações da ficha de detalhes (precisa vir depois de update)
+  const movActions=useMovementActions({ txs, update, onEdit:openEditMobile });
   // Open Finance automático: só com login (o servidor exige), dados carregados, online e sem a
   // preferência "revisar antes de salvar" ligada (nesse caso a busca fica manual, pela revisão)
   const pluggySync=usePluggyAutoSync({
@@ -587,7 +593,7 @@ function App(){
                 <span>{saveState==="saving"?"Salvando…":saveState==="saved"?"Salvo":"Falha ao salvar"}</span>
                 {saveState==="erro" && <button className="saveretry" onClick={retrySaveNow}>Tentar de novo</button>}
               </span>}
-            <GlobalSearch txs={txs} accounts={accounts} onOpen={(t)=>openEditMobile(t)}/>
+            <GlobalSearch txs={txs} accounts={accounts} onOpen={abrirFicha}/>
             <ThemeToggle/>
             <input ref={fileRef} type="file" accept="application/json" style={{display:"none"}} onChange={importData}/>
           </div>
@@ -615,12 +621,12 @@ function App(){
                 <span>Uma versão mais nova do Razão já foi baixada. Recarregue quando quiser para usá-la.</span>
                 <button className="sbtn" onClick={()=>window.location.reload()}><Icon name="brilho" size={14}/> Atualizar agora</button>
               </div>}
-            {tab==="geral" && <HomeDashboard {...{txs,accounts,monthIndex,vKey,monthLabel,totals,budgetRows,pluggy}}/>}
+            {tab==="geral" && <HomeDashboard {...{txs,accounts,monthIndex,vKey,monthLabel,totals,budgetRows,pluggy,onOpenTx:abrirFicha}}/>}
             {tab==="geral" &&
               <button className="sbtn panolink" onClick={()=>setTab("panorama")}><Icon name="grafico" size={15}/> Ver o panorama completo <Icon name="seta-direita" size={14}/></button>}
             {tab==="panorama" && <Geral {...{txs,accounts,holdings,view,onSelectMonth:selectMonth,monthIndex,update,patrimonyHistory,recaps,aiModel:settings?.aiModel||"rapido"}}/>}
-            {tab==="balanco" && <Balanco {...{grouped,monthLabel,totals,prevTotals,sparkline,plannedTotal,alerts,byCatChart,acctName,txs,view,accounts,onSelectMonth:selectMonth,update,isDesktop,onEditMobile:openEditMobile,monthIndex,categoryMemory,hourlyWageCents:settings?.hourlyWageCents||0,budgetRows,aiModel:settings?.aiModel||"rapido",pendingFilter,onConsumePendingFilter:()=>setPendingFilter(null)}}/>}
-            {tab==="orcamento" && <Orcamento {...{budgetFiltro,onBudgetFiltro:setBudgetFiltro,budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts,budgetNotify:Boolean(settings?.budgetNotify)}}/>}
+            {tab==="balanco" && <Balanco {...{grouped,monthLabel,totals,prevTotals,sparkline,plannedTotal,alerts,byCatChart,acctName,txs,view,accounts,onSelectMonth:selectMonth,update,isDesktop,onEditMobile:openEditMobile,monthIndex,categoryMemory,hourlyWageCents:settings?.hourlyWageCents||0,budgetRows,aiModel:settings?.aiModel||"rapido",pendingFilter,onConsumePendingFilter:()=>setPendingFilter(null),onOpenTx:abrirFicha}}/>}
+            {tab==="orcamento" && <Orcamento {...{onOpenTx:abrirFicha,budgetFiltro,onBudgetFiltro:setBudgetFiltro,budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts,budgetNotify:Boolean(settings?.budgetNotify)}}/>}
             {tab==="metas" && <Metas {...{goals,update,txs}}/>}
             {tab==="investimentos" && <Investimentos {...{holdings,update,monthIndex,monthLabel,txs,view,onSelectMonth:selectMonth}}/>}
             {tab==="extrato" && <Extrato {...{accounts,update,txs,aiModel:settings?.aiModel||"rapido",pluggy,categoryMemory,autoSync:pluggySync,revisarAntes:settings?.pluggyReview}}/>}
@@ -749,6 +755,8 @@ function App(){
       <Sheet open={sheetOpen} onClose={()=>setSheetOpen(false)} title={sheetEditTx?"Editar movimento":"Novo movimento"} returnFocusRef={isDesktop?fabDeskRef:fabRef}>
         <TransactionForm accounts={accounts} txs={txs} update={update} editTx={sheetEditTx} propagateIds={sheetPropagateIds} onDone={()=>setSheetOpen(false)} categoryMemory={categoryMemory} autoFocus/>
       </Sheet>
+
+      <MovementSheet txId={fichaId} txs={txs} accounts={accounts} onClose={()=>setFichaId(null)} actions={movActions} onOpenTx={abrirFicha}/>
 
       <ConflictDialog open={!!conflict} message={conflict?conflict.message:""} onReload={reloadFromServer} onKeep={keepThisScreen} onClose={()=>setConflict(null)}/>
 
