@@ -574,6 +574,13 @@ body{background:#08090D}
 }
 
 
+/* ===================== formulário de movimento ===================== */
+.rz .formactions{display:flex;gap:10px;align-items:stretch}
+.rz .formactions .sbtn{flex:0 0 auto;justify-content:center;min-width:110px}
+.rz .formactions .submit{flex:1}
+.rz .formerrs{list-style:none;margin:0 0 12px;padding:10px 12px;border-radius:10px;background:var(--neg-bg);color:var(--neg);font-size:12px;line-height:1.6}
+.rz .cathint{margin:-6px 0 12px;font-size:11px}
+
 /* ===================== Home ===================== */
 .rz .homehead{grid-column:1/-1;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .rz .hometitle{font-family:'Sora',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em;margin-top:2px}
@@ -650,7 +657,7 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.41";
+const APP_VERSION = "1.2.45";
 const APP_BUILD = "2026-10-07";
 
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
@@ -777,7 +784,9 @@ function accountsForPrompt(accounts){
    manual": a IA primeiro decide QUE documento é aquele e de QUAL conta cadastrada ele é, depois
    classifica linha por linha. */
 async function analyzeDocumentWithAI({ base64, mimeType, fileName, accounts, model }){
-  const categoryList = Object.entries(CATS).map(([t,cats])=>`- ${t}: ${cats.map(c=>c[0]).join(", ")}`).join("\n");
+  // cada categoria vem com o que costuma entrar nela; a IA deve devolver só o nome, antes dos parênteses
+  const categoryList = Object.entries(CATS).map(([t,cats])=>`- ${t}: ${cats.map(c=>catComDica(c[0])).join("; ")}`).join("\n")
+    + "\n(Use exatamente o nome da categoria, sem o texto entre parênteses.)";
   const ehImagem = /^image\//.test(mimeType||"");
   const prompt = `Você é um analista financeiro brasileiro, meticuloso, que lê documentos bancários e os transforma em lançamentos estruturados. Leia o documento INTEIRO com atenção — todas as páginas — antes de responder. Nome do arquivo: "${fileName||"documento"}". Data de hoje: ${todayISO()}.
 ${ehImagem?`
@@ -1056,8 +1065,8 @@ function lookupCategoryMemory(memory, description){
 async function suggestCategoryWithAI(description, type){
   const cats = CATS[type].map(c=>c[0]);
   const prompt = `Descrição de um lançamento financeiro: "${description}". Tipo: ${TYPES[type].label}.
-Qual das categorias abaixo melhor descreve esse lançamento? Responda com o nome exato de uma delas.
-Opções: ${cats.join(", ")}`;
+Qual das categorias abaixo melhor descreve esse lançamento? Responda com o nome exato de uma delas (sem o texto entre parênteses).
+Opções: ${cats.map(catComDica).join("; ")}`;
   const schema = { type:"OBJECT", properties:{ category:{ type:"STRING", enum:cats } }, required:["category"] };
   const text = await callGemini({ prompt, schema });
   const parsed = JSON.parse(text);
@@ -1423,7 +1432,7 @@ function garantirContasPluggy(contas, accountsAtuais, connectorName){
     const achou=matchPluggyAccount(c,atual);
     if(achou.id) return;
     const nova={
-      id:uid(), name:nomeContaAutomatica(c,connectorName,atual), kind:pluggyKind(c),
+      id:uid(), name:nomeContaAutomatica(c,connectorName,atual), kind:pluggyKind(c), bank:bancoDoNome(connectorName)||bancoDoNome(c.marketingName)||"Outro",
       color:CONTA_COLORS[atual.length%CONTA_COLORS.length],
       openingBalance:0, openingDate:"", matchKeys:achou.keys,
     };
@@ -1436,24 +1445,17 @@ function garantirContasPluggy(contas, accountsAtuais, connectorName){
 /* O Pluggy devolve a categoria em inglês e com uma árvore própria; aqui ela vira uma das categorias
    que já existem no app. O que não casar cai em "Outros" e a pessoa ajusta na revisão. */
 const PLUGGY_CAT_GASTO = [
-  [/food|drink|restaurant|supermarket|groceri|delivery|bakery|bar\b/i, "Alimentação"],
-  [/transport|uber|taxi|ride|fuel|gas station|parking|toll|airline|flight|travel|public transport/i, "Transporte"],
-  [/rent|housing|mortgage|condo|home improvement/i, "Moradia"],
-  [/utilit|electric|water|internet|telecom|phone|mobile|bill|tax|insurance|bank fee|interest charge/i, "Contas"],
+  [/tax|insurance|bank fee|fees|interest charge|late payment|educat|school|university|course|tuition/i, "Obrigações"],
+  [/food|drink|restaurant|supermarket|groceri|delivery|bakery|bar\b|shop|cloth|electronic|online|store|marketplace|department|\bpet|veterin|personal care|beauty/i, "Vida Diária"],
+  [/transport|uber|taxi|ride|fuel|gas station|parking|toll|public transport|vehicle/i, "Transporte"],
+  [/rent|housing|mortgage|condo|home improvement|utilit|electric|water|internet|telecom|phone|mobile|bill/i, "Moradia"],
   [/health|pharmac|medic|dental|hospital|doctor|gym|fitness|wellness/i, "Saúde"],
-  [/leisure|entertain|cinema|movie|game|hobby|sport|ticket|event/i, "Lazer"],
-  [/shop|cloth|electronic|online|store|marketplace|department/i, "Compras"],
-  [/educat|school|university|course|book|tuition/i, "Educação"],
-  [/subscription|streaming|software|digital service/i, "Assinaturas"],
-  [/\bpet|veterin/i, "Pets"],
+  [/leisure|entertain|cinema|movie|game|hobby|sport|ticket|event|subscription|streaming|software|digital service|travel|airline|flight|hotel|lodging/i, "Entretenimento"],
 ];
 const PLUGGY_CAT_GANHO = [
-  [/salary|payroll|wage|paycheck/i, "Salário"],
-  [/dividend|proceeds/i, "Proventos"],
-  [/interest|yield|investment income|cashback|rewards/i, "Rendimento"],
-  [/refund|reimburs|chargeback|reversal/i, "Reembolso"],
-  [/freelanc|self.?employ/i, "Freelance"],
-  [/gift|donation/i, "Presente"],
+  [/salary|payroll|wage|paycheck/i, "Salário Mensal"],
+  [/dividend|proceeds|interest|yield|investment income/i, "Proventos"],
+  [/freelanc|self.?employ|cashback|rewards|sale/i, "Renda extra"],
 ];
 function pluggyCategoria(tipo, catPluggy, desc, categoryMemory){
   const validas=CATS[tipo].map(c=>c[0]);
@@ -1650,12 +1652,13 @@ async function syncPluggyConnection({ conexao, accounts, categoryMemory, jaImpor
   });
   // saldo informado pelo próprio banco, por conta do app: é o que a Home usa como "saldo total" das contas
   // conectadas (o saldo calculado só pelos lançamentos importados não enxerga o que veio antes da janela)
-  const saldos={};
+  const saldos={}, contasDaConexao=[];
   contas.forEach(c=>{
     const m=matchPluggyAccount(c,accountsComNovas);
+    if(m && m.id) contasDaConexao.push(m.id);
     if(m && m.id && pluggyKind(c)==="conta" && typeof c.balance==="number") saldos[m.id]=Math.round(c.balance*100);
   });
-  return { status, aviso, contas, novas, accountsComNovas, docs, rows, ignorados, saldos };
+  return { status, aviso, contas, novas, accountsComNovas, docs, rows, ignorados, saldos, contasDaConexao };
 }
 
 /* linha de revisão (mesmo formato da leitura de PDF) → lançamento do app, como a revisão faz ao aprovar.
@@ -1670,14 +1673,14 @@ function pluggyRowToTx(it){
 const pluggyRowCompleta=(it)=>it.acctId && it.cents>0 && (it.type!=="transferencia"||(it.toAcctId&&it.toAcctId!==it.acctId));
 
 const SEED = {
-  schemaVersion:5, theme:"dark", transactions:[],
+  schemaVersion:6, theme:"dark", transactions:[],
   accounts:[{id:"a1",name:"Conta principal",kind:"conta",color:"#3B63C4"},{id:"c1",name:"Cartão de crédito",kind:"cartao",color:"#A57BE0"}],
   budgets:{}, budgetExceptions:{}, goals:[], holdings:[],
   categoryMemory:{}, patrimonyHistory:{}, recaps:{weekly:{},monthly:{}},
   pluggy:{items:[]},
   settings:{hourlyWageCents:0, aiModel:"rapido", colorTheme:"aco", pluggyReview:false},
 };
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 /* migrate() é idempotente: leva qualquer versão anterior (inclusive dados sem o campo schemaVersion,
    como um backup .json exportado antes desta mudança) até a atual. Nenhum campo existente é renomeado
    ou removido — só acrescentado, com um padrão seguro, só onde ainda não existir. Rodar duas vezes
@@ -1709,6 +1712,23 @@ function migrate(data){
   d.settings = { hourlyWageCents:0, aiModel:"rapido", colorTheme:"aco", pluggyReview:false, ...(d.settings||{}) };
   if(!AI_MODELS[d.settings.aiModel]) d.settings.aiModel = "rapido";
   if(!COLOR_THEME_MAP[d.settings.colorTheme]) d.settings.colorTheme = "aco";
+  // 6.0 — categorias da planilha: converte nomes antigos (lançamentos, orçamentos, exceções do mês,
+  // memória de categorização e metas ligadas). Orçamentos de categorias que viraram uma só somam o limite.
+  d.transactions = d.transactions.map(t=>{
+    const c=novaCategoria(t.type, t.category);
+    return c===t.category ? t : { ...t, category:c };
+  });
+  const fundirOrcamento=(mapa)=>{
+    const out={};
+    Object.entries(mapa||{}).forEach(([cat,v])=>{ const n=novaCategoria("gasto",cat); out[n]=(out[n]||0)+(Number(v)||0); });
+    return out;
+  };
+  d.budgets = fundirOrcamento(d.budgets);
+  d.budgetExceptions = Object.fromEntries(Object.entries(d.budgetExceptions||{}).map(([mk,m])=>[mk,fundirOrcamento(m)]));
+  d.categoryMemory = Object.fromEntries(Object.entries(d.categoryMemory||{}).map(([k,v])=>[k, novaCategoria("ganho", novaCategoria("gasto", v))]));
+  d.goals = d.goals.map(g=> g.linkedCategory ? { ...g, linkedCategory: novaCategoria("ganho", g.linkedCategory) } : g);
+  // 6.0 — banco de cada conta (BTG, Nubank…): deduz do nome quando der; o resto fica em branco até a pessoa escolher
+  d.accounts = d.accounts.map(a=> a.bank!==undefined ? a : { ...a, bank: bancoDoNome(a.name) });
   d.schemaVersion = SCHEMA_VERSION;
   return d;
 }
@@ -1783,8 +1803,8 @@ async function fetchServerUpdatedAt(userId){
 
 /* ---- referência ---- */
 const TYPES = {
-  gasto: { label: "Gasto", cls: "out", sign: -1 },
-  ganho: { label: "Ganho", cls: "in", sign: +1 },
+  gasto: { label: "Despesa", cls: "out", sign: -1 },
+  ganho: { label: "Renda", cls: "in", sign: +1 },
   investimento: { label: "Investimento", cls: "inv", sign: -1 },
   transferencia: { label: "Transferência", cls: "trf", sign: 0 }, // não soma em Entradas/Saídas/Investido; afeta só o saldo por conta (lançamento em par)
 };
@@ -1796,6 +1816,14 @@ const PAYMENT_METHODS = {
   pix:{label:"Pix"}, credito:{label:"Cartão de crédito"}, debito:{label:"Cartão de débito"},
   dinheiro:{label:"Dinheiro"}, boleto:{label:"Boleto"}, deposito:{label:"Depósito"}, ted:{label:"Transferência (TED/DOC)"},
 };
+function paymentMethodsFor(type){
+  return type==="ganho" ? ["pix","deposito","ted","dinheiro"] : ["pix","credito","debito","dinheiro","boleto"];
+}
+function defaultPaymentMethod(type, conta){
+  if(type==="ganho") return "pix";
+  if(conta && conta.kind==="cartao") return "credito";
+  return "pix";
+}
 function paymentLabel(t, accounts){
   if(t.paymentMethod && PAYMENT_METHODS[t.paymentMethod]) return PAYMENT_METHODS[t.paymentMethod].label;
   if(t.type==="transferencia") return "Transferência";
@@ -1804,12 +1832,38 @@ function paymentLabel(t, accounts){
   return "—";
 }
 const isRealized = (t)=>(t.status||"realizado")!=="previsto";
+/* categorias da planilha de referência. "Proventos" continua em Renda porque é ela que alimenta o
+   índice de Independência Financeira (renda passiva de investimentos). */
 const CATS = {
-  gasto: [["Alimentação","alimentacao"],["Transporte","transporte"],["Moradia","moradia"],["Contas","contas-cat"],["Saúde","saude"],["Lazer","lazer"],["Compras","compras"],["Educação","educacao"],["Assinaturas","assinaturas"],["Pets","pets"],["Outros","outros"]],
-  ganho: [["Salário","salario"],["Freelance","freelance"],["Presente","presente"],["Reembolso","reembolso"],["Rendimento","rendimento"],["Proventos","proventos"],["Outros","outros"]],
+  gasto: [["Moradia","moradia"],["Transporte","transporte"],["Vida Diária","alimentacao"],["Saúde","saude"],["Entretenimento","lazer"],["Obrigações","contas-cat"],["Outros","outros"]],
+  ganho: [["Salário Mensal","salario"],["Renda extra","freelance"],["Proventos","proventos"],["Outros","outros"]],
   investimento: [["Ações","acoes"],["Renda Fixa","rendafixa"],["Fundos","fundos"],["Cripto","cripto"],["Tesouro","tesouro"],["Previdência","previdencia"],["Outros","outros"]],
 };
 const CAT_ICON = Object.fromEntries(Object.values(CATS).flat().map(([n,ic])=>[n,ic]));
+// o que entra em cada categoria — aparece como dica no formulário e ajuda a IA a classificar
+const CAT_HINT = {
+  "Moradia":"aluguel, condomínio, luz, água, gás, telefone, internet",
+  "Transporte":"combustível, Uber, ônibus, estacionamento, pedágio, manutenção do carro",
+  "Vida Diária":"supermercado, padaria, restaurante, roupas, salão, pet shop",
+  "Saúde":"plano de saúde, consultas, exames, remédios, academia",
+  "Entretenimento":"lazer, cinema, streaming, viagens, bares, hobbies",
+  "Obrigações":"impostos, taxas e tarifas, juros, anuidade, escola/faculdade, seguros",
+  "Salário Mensal":"salário, pró-labore",
+  "Renda extra":"freelance, bicos, vendas, cashback",
+  "Proventos":"dividendos, juros e rendimentos de investimentos",
+};
+const catComDica = (n)=> CAT_HINT[n] ? `${n} (${CAT_HINT[n]})` : n;
+/* conversão das categorias antigas para as da planilha (schemaVersion 6). Só nomes antigos são chaves
+   aqui, então rodar de novo sobre dado já convertido não muda nada. */
+const CAT_MIGRACAO = {
+  gasto: { "Alimentação":"Vida Diária", "Compras":"Vida Diária", "Pets":"Vida Diária", "Lazer":"Entretenimento", "Assinaturas":"Entretenimento", "Contas":"Moradia", "Educação":"Obrigações" },
+  ganho: { "Salário":"Salário Mensal", "Freelance":"Renda extra", "Presente":"Outros", "Reembolso":"Outros", "Rendimento":"Proventos" },
+};
+const novaCategoria = (tipo, nome)=> (CAT_MIGRACAO[tipo] && CAT_MIGRACAO[tipo][nome]) || nome;
+// bancos oferecidos no cadastro de conta (os quatro da planilha primeiro)
+const BANKS = ["BTG Pactual","Nubank","Bradesco","Itaú","Banco do Brasil","Caixa","Santander","Inter","C6 Bank","Mercado Pago","PicPay","Outro"];
+const BANK_PATTERNS = [[/btg/i,"BTG Pactual"],[/nu ?bank|\bnu\b/i,"Nubank"],[/bradesco/i,"Bradesco"],[/ita[uú]/i,"Itaú"],[/banco do brasil|\bbb\b/i,"Banco do Brasil"],[/caixa/i,"Caixa"],[/santander/i,"Santander"],[/\binter\b/i,"Inter"],[/\bc6\b/i,"C6 Bank"],[/mercado ?pago/i,"Mercado Pago"],[/picpay/i,"PicPay"]];
+const bancoDoNome = (txt)=>{ const m=BANK_PATTERNS.find(([re])=>re.test(String(txt||""))); return m ? m[1] : ""; };
 const CLASSES = ["Renda Fixa","Renda Variável","Fundos","Cripto","Tesouro","Previdência","Outros"];
 // paleta qualitativa (nunca usa o acento para valor semântico de entrada/saída/investimento — só para identidade de categoria)
 const QUALITATIVE = ["#F76B3C","#5A8DEE","#2FB98A","#E8B23C","#A57BE0","#E2564D","#46B7C7","#8C93A8"];
@@ -2406,6 +2460,101 @@ function RecoverySetPassword({ onDone }){
 }
 
 /* =========================== APP =========================== */
+/* ---- espelho relacional (tabelas bank_accounts, movements e budgets no Supabase) ----
+   finance_data continua sendo a fonte principal. Depois de cada salvamento confirmado, a mesma informação
+   vai, normalizada, para as tabelas relacionais (ver supabase/migrations) — só o que mudou desde a última
+   vez, e o que sumiu daqui é apagado lá. Serve para consultar por SQL (Power BI, relatórios) e para a
+   sincronização do Open Finance no servidor. Se as tabelas ainda não foram criadas, o espelho se desliga
+   sozinho naquela sessão, sem erro nenhum para a pessoa. */
+const MIRROR_TABLES=["bank_accounts","movements","budgets"];
+const MIRROR_CHUNK=500;
+function isMissingTableError(err){
+  const m=String((err&&err.message)||"");
+  return Boolean(err) && (err.code==="42P01" || err.code==="PGRST205" || /does not exist|could not find the table|schema cache/i.test(m));
+}
+const finalDaConta=(a)=>{ const k=(a.matchKeys||[])[0]; return k ? String(k).split(":").pop() : null; };
+function mirrorRows(data, userId){
+  const accounts=data.accounts||[], txs=data.transactions||[];
+  const itens=(data.pluggy&&data.pluggy.items)||[];
+  const bank_accounts=saldosPorConta(txs, accounts).map(a=>{
+    const item=a.pluggyItemId ? itens.find(i=>i.id===a.pluggyItemId) : null;
+    return { user_id:userId, id:String(a.id), name:a.name||"Conta", bank_name:a.bank||null, kind:a.kind==="cartao"?"cartao":"conta",
+      account_number:finalDaConta(a), balance:a.saldo/100, opening_balance:(a.openingBalance||0)/100,
+      pluggy_item_id:a.pluggyItemId||null, last_sync:(item&&item.lastSyncAt)||null,
+      sync_status: item ? (item.lastError ? "error" : item.lastSyncAt ? "active" : "pending") : null,
+      error_message:(item&&item.lastError)||null };
+  });
+  const extVistos=new Set();
+  const movements=txs.filter(t=>t && t.id && TYPES[t.type] && DATE_RE.test(t.date||"")).map(t=>{
+    // o índice único (usuário, external_id) não aceita repetição: um id do banco duplicado por dado antigo fica só no primeiro
+    let ext=t.pluggyId||null;
+    if(ext){ if(extVistos.has(ext)) ext=null; else extVistos.add(ext); }
+    return { user_id:userId, id:String(t.id), bank_account_id:t.acctId||null, to_account_id:t.type==="transferencia"?(t.toAcctId||null):null,
+      type:t.type, category:t.category||null, amount:(t.type==="ganho"?1:-1)*(t.cents||0)/100, payment_method:t.paymentMethod||null,
+      date:t.date, description:t.description||null, status:isRealized(t)?"realizado":"previsto",
+      source:t.source||(t.pluggyId?"pluggy_sync":"manual"), external_id:ext, series_id:t.seriesId||null };
+  });
+  const budgets=[];
+  Object.entries(data.budgets||{}).forEach(([cat,v])=>{ if(v>0) budgets.push({ user_id:userId, id:`${cat}|padrao`, category:cat, limit_amount:v/100, month_year:"padrao" }); });
+  Object.entries(data.budgetExceptions||{}).forEach(([mk,m])=>Object.entries(m||{}).forEach(([cat,v])=>{
+    if(v>0) budgets.push({ user_id:userId, id:`${cat}|${mk}`, category:cat, limit_amount:v/100, month_year:mk });
+  }));
+  return { bank_accounts, movements, budgets };
+}
+async function mirrorFetchIds(table, userId){
+  const ids=[];
+  for(let de=0; de<200000; de+=1000){
+    const { data, error }=await sb.from(table).select("id").eq("user_id",userId).range(de,de+999);
+    if(error) throw error;
+    (data||[]).forEach(r=>ids.push(r.id));
+    if(!data || data.length<1000) break;
+  }
+  return ids;
+}
+async function syncMirror(userId, data, cache){
+  if(!sb || !userId || !cache) return;
+  if(cache.userId!==userId){ Object.assign(cache,{ userId, available:null, last:null, status:"", error:"", at:0 }); }
+  if(cache.available===false) return;
+  if(cache.running){ cache.pending=data; return; }
+  cache.running=true;
+  try{
+    if(cache.available==null){
+      const probe=await sb.from("movements").select("id").limit(1);
+      if(probe.error){
+        if(isMissingTableError(probe.error)){ cache.available=false; cache.status="ausente"; return; }
+        throw probe.error;
+      }
+      cache.available=true;
+      cache.last={};
+      for(const t of MIRROR_TABLES) cache.last[t]=new Map((await mirrorFetchIds(t,userId)).map(id=>[id,null]));
+    }
+    const rows=mirrorRows(data,userId);
+    for(const t of MIRROR_TABLES){
+      const antes=cache.last[t], depois=new Map(), mudou=[];
+      for(const r of rows[t]){ if(depois.has(r.id)) continue; const j=JSON.stringify(r); depois.set(r.id,j); if(antes.get(r.id)!==j) mudou.push(r); }
+      const sumiram=[...antes.keys()].filter(id=>!depois.has(id));
+      // apaga antes de gravar: um lançamento do banco removido e reimportado com outro id não esbarra no índice único
+      for(let i=0;i<sumiram.length;i+=MIRROR_CHUNK){
+        const { error }=await sb.from(t).delete().eq("user_id",userId).in("id",sumiram.slice(i,i+MIRROR_CHUNK));
+        if(error) throw error;
+      }
+      for(let i=0;i<mudou.length;i+=MIRROR_CHUNK){
+        const { error }=await sb.from(t).upsert(mudou.slice(i,i+MIRROR_CHUNK),{ onConflict:"user_id,id" });
+        if(error) throw error;
+      }
+      cache.last[t]=depois;
+    }
+    cache.status="ok"; cache.error=""; cache.at=Date.now();
+  }catch(err){
+    cache.status="erro"; cache.error=(err&&err.message)||String(err);
+    console.warn("Espelho relacional não sincronizou:", err);
+  }finally{
+    cache.running=false;
+    if(cache.onChange) cache.onChange({ status:cache.status, error:cache.error, at:cache.at });
+    if(cache.pending){ const proximo=cache.pending; cache.pending=null; syncMirror(userId, proximo, cache); }
+  }
+}
+
 /* ---- sincronização automática do Open Finance (Pluggy) ----
    Roda enquanto o app está aberto e logado: ao abrir, e a cada 5 minutos confere quais conexões
    passaram de 6h sem atualizar e busca só essas, em sequência. Falha de rede ou do banco ganha nova
@@ -2450,7 +2599,13 @@ function usePluggyAutoSync({ ativo, data, update }){
         const conhecidos=new Set(dd.transactions.filter(t=>t.pluggyId).map(t=>t.pluggyId));
         const add=prontos.filter(t=>!t.pluggyId||!conhecidos.has(t.pluggyId));
         const contasNovas=r.novas.filter(a=>!dd.accounts.some(x=>x.id===a.id));
-        const accounts=[...dd.accounts,...contasNovas].map(a=>r.saldos[a.id]!==undefined ? {...a, bankBalance:r.saldos[a.id], bankBalanceAt:agora} : a);
+        const daConexao=new Set(r.contasDaConexao||[]);
+        const accounts=[...dd.accounts,...contasNovas].map(a=>{
+          let n=a;
+          if(daConexao.has(a.id) && a.pluggyItemId!==conexao.id) n={...n, pluggyItemId:conexao.id};
+          if(r.saldos[a.id]!==undefined) n={...n, bankBalance:r.saldos[a.id], bankBalanceAt:agora};
+          return n;
+        });
         return {
           transactions:[...add,...dd.transactions],
           accounts,
@@ -2620,6 +2775,9 @@ function App(){
   const saveTimer=useRef(null);
   const retryTimer=useRef(null);
   const saveInFlightRef=useRef(false);   // um salvamento está a caminho do servidor agora
+  const mirrorRef=useRef({});            // estado do espelho relacional (tabelas do Supabase)
+  const [mirrorStatus,setMirrorStatus]=useState({ status:"", error:"", at:0 });
+  mirrorRef.current.onChange=setMirrorStatus;
   const skipNextSaveRef=useRef(false);   // os dados acabaram de VIR do servidor: não há o que salvar de volta
   const lastKnownUpdatedAtRef=useRef(null);
   const dirtyRef=useRef(false); // há alteração ainda não confirmada como salva (para o aviso de beforeunload)
@@ -2724,6 +2882,8 @@ function App(){
       // mantém o espelho offline sempre no que acabou de ser confirmado como salvo — não só no que
       // foi carregado na abertura — senão uma sessão longa cheia de edições ficaria com um espelho velho
       if(sb && userId){ try{ localStorage.setItem("razao_offline_cache", JSON.stringify({ data:dataToSave, cachedAt:Date.now() })); }catch(_){} }
+      // espelho relacional: fora do caminho crítico — falhar aqui nunca impede nem desfaz o salvamento principal
+      if(sb && userId) syncMirror(userId, dataToSave, mirrorRef.current);
     }catch(err){
       console.error(err);
       setSaveState("erro");
@@ -3177,7 +3337,18 @@ function App(){
               <Icon name="excluir" size={14}/> Apagar transações, contas e cartões
             </button>
                 <div className="sheetdivider"/>
-                <div className="sub" style={{marginBottom:8}}>Backup dos dados</div>
+                {sb &&
+              <React.Fragment>
+                <div className="sub" style={{marginBottom:6}}>Tabelas relacionais no Supabase</div>
+                <div className="hint" style={{marginTop:0}}>
+                  {mirrorStatus.status==="ok" ? `Sincronizadas ${tempoDesde(new Date(mirrorStatus.at).toISOString())}: contas, movimentos e orçamentos ficam também em bank_accounts, movements e budgets, prontos para consulta por SQL.`
+                    : mirrorStatus.status==="ausente" ? "Ainda não instaladas. Rode uma vez o arquivo supabase/migrations/20261007000000_tabelas_relacionais.sql no SQL Editor do Supabase; até lá o app segue normal, só com o registro principal."
+                    : mirrorStatus.status==="erro" ? `A última cópia para as tabelas falhou (${mirrorStatus.error}). Seus dados principais estão salvos; o app tenta de novo no próximo salvamento.`
+                    : "Conferindo na próxima vez que algo for salvo…"}
+                </div>
+                <div className="sheetdivider"/>
+              </React.Fragment>}
+            <div className="sub" style={{marginBottom:8}}>Backup dos dados</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   <button className="sbtn" onClick={()=>exportData()}><Icon name="baixar" size={14}/> Exportar backup (.json)</button>
                   <button className="sbtn" onClick={exportCSV}><Icon name="baixar" size={14}/> Exportar dados (.csv)</button>
@@ -3208,7 +3379,7 @@ function App(){
 
 
 
-      <Sheet open={sheetOpen} onClose={()=>setSheetOpen(false)} title={sheetEditTx?"Editar lançamento":"Novo lançamento"} returnFocusRef={isDesktop?fabDeskRef:fabRef}>
+      <Sheet open={sheetOpen} onClose={()=>setSheetOpen(false)} title={sheetEditTx?"Editar movimento":"Novo movimento"} returnFocusRef={isDesktop?fabDeskRef:fabRef}>
         <TransactionForm accounts={accounts} txs={txs} update={update} editTx={sheetEditTx} propagateIds={sheetPropagateIds} onDone={()=>setSheetOpen(false)} categoryMemory={categoryMemory} autoFocus/>
       </Sheet>
 
@@ -3250,7 +3421,7 @@ function App(){
 function TransactionForm({ accounts, txs, update, editTx, onDone, autoFocus, propagateIds, categoryMemory }){
   const [type,setType]=useState(editTx?editTx.type:"gasto");
   const [cents,setCents]=useState(editTx?editTx.cents:0);
-  const [cat,setCat]=useState(editTx?(editTx.category||CATS.gasto[0][0]):"Alimentação");
+  const [cat,setCat]=useState(editTx?(editTx.category||CATS.gasto[0][0]):CATS.gasto[0][0]);
   const [desc,setDesc]=useState(editTx?editTx.description:"");
   const [date,setDate]=useState(editTx?editTx.date:todayISO());
   const [acctId,setAcctId]=useState(editTx?(editTx.acctId||accounts[0]?.id||""):(accounts[0]?.id||""));
@@ -3260,6 +3431,10 @@ function TransactionForm({ accounts, txs, update, editTx, onDone, autoFocus, pro
   const [repeatTimes,setRepeatTimes]=useState(2);
   const [catManual,setCatManual]=useState(!!editTx);
   const [catSuggestBusy,setCatSuggestBusy]=useState(false);
+  // método de pagamento: sugerido pela conta (cartão → crédito) até a pessoa escolher na mão
+  const [pay,setPay]=useState(editTx?(editTx.paymentMethod||""):"");
+  const [payManual,setPayManual]=useState(Boolean(editTx&&editTx.paymentMethod));
+  const [tentou,setTentou]=useState(false); // só mostra os erros depois da primeira tentativa de salvar
   const formRef=useRef(null);
   const descTimer=useRef(null);
   const editId=editTx?editTx.id:null;
@@ -3293,11 +3468,29 @@ function TransactionForm({ accounts, txs, update, editTx, onDone, autoFocus, pro
 
   const isTransfer=type==="transferencia";
   const transferInvalid=isTransfer && (!toAcctId || acctId===toAcctId);
+  const contaAtual=accounts.find(a=>a.id===acctId);
+  const metodos=paymentMethodsFor(type);
+  useEffect(()=>{
+    if(payManual || isTransfer) return;
+    setPay(defaultPaymentMethod(type, contaAtual));
+  },[type, acctId, payManual]);
+  // validação do roteiro: valor > 0, categoria, conta e método obrigatórios; movimento avulso novo não pode
+  // ficar no futuro (conta futura entra por "Repetir / Parcelar", que já cria os previstos dos próximos meses)
+  const erros=[];
+  if(!(cents>0)) erros.push("Informe um valor maior que zero.");
+  if(!isTransfer && !cat) erros.push("Escolha uma categoria.");
+  if(accounts.length===0) erros.push("Cadastre uma conta em Configurações › Contas e bancos.");
+  else if(!acctId) erros.push("Escolha o banco/conta.");
+  if(!isTransfer && !pay) erros.push("Escolha o método de pagamento.");
+  if(transferInvalid) erros.push("A conta de origem e a de destino devem ser diferentes.");
+  if(!DATE_RE.test(date||"")) erros.push("Informe a data.");
+  else if(!editId && !repeat && date>todayISO()) erros.push("A data não pode estar no futuro. Para contas que ainda vão vencer, use \"Repetir / Parcelar\".");
 
   function submit(){
-    if(cents<=0)return;
-    if(transferInvalid)return;
+    setTentou(true);
+    if(erros.length) return;
     const entryCat=isTransfer?"":cat;
+    const entryPay=isTransfer?undefined:pay;
     const entryToAcct=isTransfer?toAcctId:undefined;
     const today=todayISO();
     // memória de categorização: toda vez que um lançamento com descrição é salvo, guarda a categoria escolhida
@@ -3309,17 +3502,19 @@ function TransactionForm({ accounts, txs, update, editTx, onDone, autoFocus, pro
       const baseDesc=desc.trim()||(isTransfer?"Transferência":cat);
       const sId=uid(); // agrupa a série toda (recorrência/parcelamento) pra permitir editar/excluir em bloco depois
       const entries = repeatMode==="parcelado"
-        ? splitCents(cents,n).map((c,i)=>{ const d=addMonthsISO(date,i); return { id:uid(), type, cents:c, category:entryCat, description:`${baseDesc} (${i+1}/${n})`, date:d, acctId, toAcctId:entryToAcct, status:d>today?"previsto":"realizado", seriesId:sId, seriesIndex:i, seriesTotal:n }; })
-        : Array.from({length:n},(_,i)=>{ const d=addMonthsISO(date,i); return { id:uid(), type, cents, category:entryCat, description:desc.trim(), date:d, acctId, toAcctId:entryToAcct, status:d>today?"previsto":"realizado", seriesId:sId, seriesIndex:i, seriesTotal:n }; });
+        ? splitCents(cents,n).map((c,i)=>{ const d=addMonthsISO(date,i); return { id:uid(), type, cents:c, category:entryCat, description:`${baseDesc} (${i+1}/${n})`, date:d, acctId, toAcctId:entryToAcct, paymentMethod:entryPay, source:"manual", status:d>today?"previsto":"realizado", seriesId:sId, seriesIndex:i, seriesTotal:n }; })
+        : Array.from({length:n},(_,i)=>{ const d=addMonthsISO(date,i); return { id:uid(), type, cents, category:entryCat, description:desc.trim(), date:d, acctId, toAcctId:entryToAcct, paymentMethod:entryPay, source:"manual", status:d>today?"previsto":"realizado", seriesId:sId, seriesIndex:i, seriesTotal:n }; });
       update(d=>withMemory(d,{transactions:[...entries,...d.transactions]}));
       toast(`${n} lançamentos criados.`,"success");
-      setCents(0);setDesc("");setRepeat(false);setRepeatTimes(2);setCatManual(false);
+      setCents(0);setDesc("");setRepeat(false);setRepeatTimes(2);setCatManual(false);setTentou(false);
       formRef.current?.querySelector("input")?.focus();
       onDone && onDone();
       return;
     }
     const entry={
+      ...(editTx||{}), // edição preserva o que o formulário não mostra (id do banco, origem, tags de série…)
       id:editId||uid(), type, cents, category:entryCat, description:desc.trim(), date, acctId, toAcctId:entryToAcct,
+      paymentMethod:entryPay, source:(editTx&&editTx.source)||"manual",
       status: editId ? (editTx.status||"realizado") : (date>today?"previsto":"realizado"),
       ...(editId ? { seriesId:editTx.seriesId, seriesIndex:editTx.seriesIndex, seriesTotal:editTx.seriesTotal } : {}),
     };
@@ -3329,14 +3524,14 @@ function TransactionForm({ accounts, txs, update, editTx, onDone, autoFocus, pro
         if(t.id===editId) return entry;
         // não propaga a descrição: no parcelado ela carrega o número da própria parcela "(2/4)" etc.,
         // então sobrescrever com a descrição do item editado apagaria a numeração dos outros.
-        if(propagateIds.includes(t.id)) return {...t, type:entry.type, cents:entry.cents, category:entry.category, acctId:entry.acctId, toAcctId:entry.toAcctId};
+        if(propagateIds.includes(t.id)) return {...t, type:entry.type, cents:entry.cents, category:entry.category, acctId:entry.acctId, toAcctId:entry.toAcctId, paymentMethod:entry.paymentMethod};
         return t;
       })}));
     } else {
       update(d=>withMemory(d,{transactions:editId?d.transactions.map(t=>t.id===editId?entry:t):[entry,...d.transactions]}));
     }
-    toast(editId?"Lançamento atualizado.":"Lançamento adicionado.","success");
-    setCents(0);setDesc("");setCatManual(false);
+    toast(editId?"Movimento atualizado.":"Movimento salvo.","success");
+    setCents(0);setDesc("");setCatManual(false);setTentou(false);
     formRef.current?.querySelector("input")?.focus();
     onDone && onDone();
   }
@@ -3356,6 +3551,7 @@ function TransactionForm({ accounts, txs, update, editTx, onDone, autoFocus, pro
             </button>)}
           {catSuggestBusy && <span className="aichip"><Icon name="brilho" size={12}/><span className="shimmer"/></span>}
         </div>}
+      {!isTransfer && CAT_HINT[cat] && <p className="hint cathint">{cat}: {CAT_HINT[cat]}</p>}
       <div className="row2">
         <div style={{position:"relative"}}>
           <input className="fld" placeholder="Descrição (opcional) — use #tags" value={desc} onChange={e=>setDesc(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")submit();}}/>
@@ -3378,9 +3574,16 @@ function TransactionForm({ accounts, txs, update, editTx, onDone, autoFocus, pro
             {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         )}
-        <input className="fld" type="date" value={date} onChange={e=>setDate(e.target.value)} style={{flex:"0 0 auto",maxWidth:160}}/>
+        <input className="fld" type="date" value={date} max={(!editId&&!repeat)?todayISO():undefined} onChange={e=>setDate(e.target.value)} style={{flex:"0 0 auto",maxWidth:160}} aria-label="Data"/>
       </div>
-      {isTransfer && transferInvalid && <p className="hint" style={{color:"var(--neg)"}}>A conta de origem e destino devem ser diferentes.</p>}
+      {!isTransfer &&
+        <div className="row2">
+          <select className="fld" aria-label="Método de pagamento" value={pay} onChange={e=>{setPay(e.target.value);setPayManual(true);}}>
+            <option value="">Método de pagamento…</option>
+            {metodos.map(k=><option key={k} value={k}>{PAYMENT_METHODS[k].label}</option>)}
+          </select>
+        </div>}
+      {isTransfer && transferInvalid && !tentou && <p className="hint" style={{color:"var(--neg)"}}>A conta de origem e destino devem ser diferentes.</p>}
       {!editId &&
         <label className="toggle">
           <input type="checkbox" checked={repeat} onChange={e=>setRepeat(e.target.checked)}/>
@@ -3404,7 +3607,12 @@ function TransactionForm({ accounts, txs, update, editTx, onDone, autoFocus, pro
               : <>Serão criados {n} lançamentos de {brl(cents)} cada, de {fmtDateBR(date)} até {fmtDateBR(addMonthsISO(date,n-1))}.</>}
           </p>);
       })()}
-      <button className="submit" onClick={submit} disabled={cents<=0||transferInvalid}>{editId?"Salvar alterações":repeat?`Criar ${Math.max(2,parseInt(repeatTimes,10)||2)} lançamentos`:"Salvar lançamento"}</button>
+      {tentou && erros.length>0 &&
+        <ul className="formerrs" role="alert">{erros.map(e=><li key={e}>{e}</li>)}</ul>}
+      <div className="formactions">
+        {onDone && <button type="button" className="sbtn" onClick={onDone}>Cancelar</button>}
+        <button className="submit" onClick={submit}>{editId?"Salvar alterações":repeat?`Criar ${Math.max(2,parseInt(repeatTimes,10)||2)} lançamentos`:"Salvar"}</button>
+      </div>
     </div>
   );
 }
@@ -3564,7 +3772,7 @@ const AI_SUMMARY_STYLE = `Escreva em português do Brasil, na segunda pessoa ("v
 REGRAS:
 - Use SOMENTE os números do JSON. Nunca invente valor, categoria ou lançamento que não esteja lá.
 - Sempre que citar um número, dê o contexto: quanto foi, quanto era antes, quantos por cento mudou.
-- Prefira a causa concreta ("Lazer subiu 62% por causa dos R$ 380 do dia 12") ao efeito genérico ("os gastos aumentaram").
+- Prefira a causa concreta ("Entretenimento subiu 62% por causa dos R$ 380 do dia 12") ao efeito genérico ("os gastos aumentaram").
 - Se o mês ainda está em andamento (mesEmAndamento = true), fale em ritmo e projeção, não em fechamento.
 - Se faltar dado para alguma seção, diga isso em uma linha em vez de encher linguiça.
 - Valores em reais no formato R$ 1.234,56.
@@ -3642,7 +3850,13 @@ function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTo
       askSeriesScope({ tx:t, txs, action:"excluir", onChoice:(ids)=>doRequestDelete(ids, t) });
       return;
     }
-    doRequestDelete([t.id], t);
+    // confirma antes; e mesmo depois de confirmar ainda dá para desfazer pelo aviso por alguns segundos
+    askConfirm({
+      title:"Excluir movimento?",
+      message:`"${t.description||t.category||TYPES[t.type].label}" de ${brl(t.cents)} em ${fmtDateBR(t.date)} será excluído.`,
+      confirmLabel:"Excluir",
+      onConfirm:()=>doRequestDelete([t.id], t),
+    });
   }
   function markAsPaid(t){
     update(d=>({transactions:d.transactions.map(x=>x.id===t.id?{...x,status:"realizado"}:x)}));
@@ -5109,7 +5323,7 @@ function Contas({ accounts, update, monthTx, txs }){
       registradoNaoNaFatura: registered.filter(t=>!usedRegIds.has(t.id)),
     });
   }
-  const blank={name:"",kind:"conta",color:"#3B63C4",closingDay:"",dueDay:"",limit:0,openingBalance:0,openingDate:todayISO()};
+  const blank={name:"",kind:"conta",bank:"",color:"#3B63C4",closingDay:"",dueDay:"",limit:0,openingBalance:0,openingDate:todayISO()};
   const COLORS=["#3B63C4","#E05A2B","#12805F","#C2382F","#B87C10","#A57BE0","#46B7C7","#8C93A8"];
   const save=()=>{if(!form.name.trim())return;update(d=>({accounts: form.id?d.accounts.map(x=>x.id===form.id?form:x):[...d.accounts,{...form,id:uid()}]}));setForm(null);toast("Conta salva.","success");};
   const remove=(a)=>{
@@ -5145,7 +5359,11 @@ function Contas({ accounts, update, monthTx, txs }){
       <div className="sub">Organize de onde entra e sai cada valor. Cartões mostram a fatura do mês.</div>
       {form &&
         <div className="miniform">
-          <input className="fld" placeholder="Nome (ex: Nubank, Carteira)" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} style={{marginBottom:10}}/>
+          <input className="fld" placeholder="Nome (ex: Nubank, Carteira)" value={form.name} onChange={e=>setForm({...form,name:e.target.value,bank:form.bank||bancoDoNome(e.target.value)})} style={{marginBottom:10}}/>
+          <select className="fld" aria-label="Banco" value={form.bank||""} onChange={e=>setForm({...form,bank:e.target.value})} style={{marginBottom:10}}>
+            <option value="">Banco…</option>
+            {BANKS.map(b=><option key={b} value={b}>{b}</option>)}
+          </select>
           <div className="seg" style={{marginBottom:10}}>
             <button className={form.kind==="conta"?"on in":""} onClick={()=>setForm({...form,kind:"conta"})}><Icon name="banco" size={14}/> Conta</button>
             <button className={form.kind==="cartao"?"on inv":""} onClick={()=>setForm({...form,kind:"cartao"})}><Icon name="cartao" size={14}/> Cartão</button>
@@ -5183,7 +5401,7 @@ function Contas({ accounts, update, monthTx, txs }){
             <div className="adot" style={{background:a.color}}><Icon name={a.kind==="cartao"?"cartao":"banco"} size={16}/></div>
             <div style={{flex:1}}>
               <div className="aname">{a.name}</div>
-              <div className="akind">{a.kind==="cartao"?<>Cartão{a.closingDay?` · fecha dia ${a.closingDay}`:""}{a.dueDay?` · vence dia ${a.dueDay}`:""} · fatura do mês {inv.net===0&&inv.gasto>0?"quitada":brl(inv.net)}{inv.credit>0?` · ${brl(inv.credit)} pagos a mais`:""}</>:"Conta"}{a.openingBalance?<> · saldo inicial {brl(a.openingBalance)}{a.openingDate?` em ${fmtDateBR(a.openingDate)}`:""}</>:""}</div>
+              <div className="akind">{a.bank && a.bank!=="Outro" ? `${a.bank} · ` : ""}{a.kind==="cartao"?<>Cartão{a.closingDay?` · fecha dia ${a.closingDay}`:""}{a.dueDay?` · vence dia ${a.dueDay}`:""} · fatura do mês {inv.net===0&&inv.gasto>0?"quitada":brl(inv.net)}{inv.credit>0?` · ${brl(inv.credit)} pagos a mais`:""}</>:"Conta"}{a.openingBalance?<> · saldo inicial {brl(a.openingBalance)}{a.openingDate?` em ${fmtDateBR(a.openingDate)}`:""}</>:""}</div>
             </div>
             {a.kind==="cartao" && <button className="sbtn iconsbtn" aria-label="Auditar fatura" onClick={()=>openAudit(a)}><Icon name="documento" size={14}/></button>}
             <button className="sbtn iconsbtn" aria-label="Editar" onClick={()=>setForm(a)}><Icon name="editar" size={14}/></button>
@@ -5339,7 +5557,7 @@ function parseExtratoText(text){
     if(isNaN(num))return;
     const cents=Math.round(num*100);
     const type=neg?"gasto":"ganho";
-    out.push({ id:uid(), date:iso, desc:desc.trim(), cents, type, category:CATS[type][0][0], acctId:"" });
+    out.push({ id:uid(), date:iso, desc:desc.trim(), cents, type, category:CATS[type][CATS[type].length-1][0], acctId:"" });
   });
   return out;
 }
@@ -6269,16 +6487,16 @@ const DEMO_DATA = (()=>{
   const iso=(dt)=>new Date(dt.getTime()-dt.getTimezoneOffset()*60000).toISOString().slice(0,10);
   const d=(daysAgo)=>{ const x=new Date(today); x.setDate(x.getDate()-daysAgo); return iso(x); };
   const transactions=[
-    { id:"demo-t1", type:"ganho", cents:450000, category:"Salário", description:"Salário", date:d(20), acctId:acc1.id, status:"realizado" },
-    { id:"demo-t2", type:"gasto", cents:8900, category:"Alimentação", description:"Mercado #casa", date:d(18), acctId:acc1.id, status:"realizado" },
+    { id:"demo-t1", type:"ganho", cents:450000, category:"Salário Mensal", description:"Salário", date:d(20), acctId:acc1.id, status:"realizado" },
+    { id:"demo-t2", type:"gasto", cents:8900, category:"Vida Diária", description:"Mercado #casa", date:d(18), acctId:acc1.id, status:"realizado" },
     { id:"demo-t3", type:"gasto", cents:3200, category:"Transporte", description:"Uber #trabalho", date:d(15), acctId:acc2.id, status:"realizado" },
-    { id:"demo-t4", type:"gasto", cents:5500, category:"Lazer", description:"Cinema", date:d(10), acctId:acc2.id, status:"realizado" },
+    { id:"demo-t4", type:"gasto", cents:5500, category:"Entretenimento", description:"Cinema", date:d(10), acctId:acc2.id, status:"realizado" },
     { id:"demo-t5", type:"investimento", cents:60000, category:"Renda Fixa", description:"Aporte mensal", date:d(9), acctId:acc1.id, status:"realizado" },
     { id:"demo-t6", type:"transferencia", cents:35000, category:"", description:"Pagamento da fatura", date:d(5), acctId:acc1.id, toAcctId:acc2.id, status:"realizado" },
     { id:"demo-t7", type:"gasto", cents:12000, category:"Contas", description:"Internet", date:d(3), acctId:acc1.id, status:"realizado" },
-    { id:"demo-t8", type:"ganho", cents:15000, category:"Freelance", description:"Bico de fim de semana", date:iso(new Date(today.getTime()+3*86400000)), acctId:acc1.id, status:"previsto" },
+    { id:"demo-t8", type:"ganho", cents:15000, category:"Renda extra", description:"Bico de fim de semana", date:iso(new Date(today.getTime()+3*86400000)), acctId:acc1.id, status:"previsto" },
   ];
-  const budgets={ "Alimentação":100000, "Lazer":40000 };
+  const budgets={ "Vida Diária":100000, "Entretenimento":40000 };
   const goals=[{ id:"demo-g1", name:"Viagem", target:500000, saved:120000, deadline:iso(new Date(today.getFullYear(),today.getMonth()+6,1)), linkedCategory:null }];
   const holdings=[{ id:"demo-h1", name:"Tesouro Selic 2029", cls:"Renda Fixa", invested:200000, current:214000 }];
   return { accounts, transactions, budgets, goals, holdings };
@@ -6334,7 +6552,7 @@ function SwipeDiagram(){
       <rect x="4" y="8" width="230" height="54" rx="12" fill="var(--surface)" stroke="var(--hairline)"/>
       <circle cx="30" cy="35" r="12" fill="var(--neg-bg)"/>
       <text x="54" y="31" fontSize="12" fill="var(--text)" fontFamily="Inter,sans-serif">Mercado</text>
-      <text x="54" y="46" fontSize="10" fill="var(--text-mut)" fontFamily="Inter,sans-serif">Alimentação</text>
+      <text x="54" y="46" fontSize="10" fill="var(--text-mut)" fontFamily="Inter,sans-serif">Vida Diária</text>
       <rect x="238" y="8" width="78" height="54" rx="12" fill="var(--neg-bg)"/>
       <text x="277" y="40" fontSize="10" fill="var(--neg)" textAnchor="middle" fontFamily="Inter,sans-serif">Excluir</text>
       <path d="M175 65 L145 65" stroke="var(--accent)" strokeWidth="2" markerEnd="url(#swipearrow)"/>
@@ -6506,7 +6724,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
           <HelpSection id="registrar-lancamentos" n={2} title="Registrar lançamentos"
             purpose="Os quatro tipos de lançamento e os campos do formulário."
             steps={[
-              "Escolha o tipo: Gasto, Ganho, Investimento ou Transferência.",
+              "Escolha o tipo: Despesa, Renda, Investimento ou Transferência. Depois o valor, a categoria, o banco/conta, a data e o método de pagamento (Pix, crédito, débito, dinheiro, boleto…) — o método já vem sugerido pela conta.",
               "Digite o valor sem vírgula — os dois últimos dígitos viram os centavos automaticamente (ex: 1590 vira R$ 15,90).",
               "Escolha a categoria, ou deixe a IA sugerir enquanto você digita a descrição (ela também aprende com o que você já categorizou antes).",
               "Use #tags na descrição pra marcar lançamentos que quer acompanhar juntos depois (ex: #viagem) — elas viram chips clicáveis na lista.",
@@ -6616,7 +6834,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
             purpose="Cadastrar sua carteira, acompanhar aportes, proventos e indicadores de mercado."
             steps={[
               "Cadastre cada ativo com o valor aplicado e o valor atual — a diferença é o rendimento.",
-              "Lançamentos do tipo Investimento contam como aporte do mês; do tipo Ganho na categoria \"Proventos\" contam como provento.",
+              "Lançamentos do tipo Investimento contam como aporte do mês; do tipo Renda na categoria \"Proventos\" contam como provento.",
               "Selic, CDI e IPCA (Banco Central) aparecem na Home, atualizados uma vez por dia.",
               "Independência Financeira mostra quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios.",
             ]}
@@ -6679,7 +6897,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
                   <input type="checkbox" checked readOnly tabIndex={-1}/>
                   <div style={{flex:1,minWidth:0,fontSize:13}}>
                     12/07/2026 · Mercado XYZ (3/10)
-                    <div className="mm" style={{marginTop:4}}>Vira gasto em Alimentação, no Cartão Roxo.</div>
+                    <div className="mm" style={{marginTop:4}}>Vira despesa em Vida Diária, no Cartão Roxo.</div>
                   </div>
                 </div>
               </div>
@@ -6695,8 +6913,8 @@ function Ajuda({ helpTarget, onConsumeTarget }){
             ]}
             tip="Perguntas específicas (com categoria, período ou valor) tendem a dar respostas melhores do que perguntas muito abertas.">
             <HelpExample label="pergunta e resposta">
-              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>Você perguntou: quanto gastei com Alimentação esse mês?</div>
-              <div style={{fontSize:14,lineHeight:1.6,color:"var(--text-mut)"}}>No exemplo, R$ 89,00 em Alimentação — um único lançamento, o mercado do dia 18.</div>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>Você perguntou: quanto gastei com Vida Diária esse mês?</div>
+              <div style={{fontSize:14,lineHeight:1.6,color:"var(--text-mut)"}}>No exemplo, R$ 89,00 em Vida Diária — um único lançamento, o mercado do dia 18.</div>
             </HelpExample>
           </HelpSection>}
 
@@ -6712,7 +6930,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
             tip="O contador de resultados e a soma aparecem junto da busca, sempre que algum filtro está ativo.">
             <HelpExample label="filtros ativos como chips">
               <div className="chiprow" style={{marginTop:0}}>
-                <div className="filterchip"><span>Categoria: Alimentação</span><button aria-label="Remover" type="button" tabIndex={-1}><Icon name="fechar" size={12}/></button></div>
+                <div className="filterchip"><span>Categoria: Vida Diária</span><button aria-label="Remover" type="button" tabIndex={-1}><Icon name="fechar" size={12}/></button></div>
                 <div className="filterchip"><span>#viagem</span><button aria-label="Remover" type="button" tabIndex={-1}><Icon name="fechar" size={12}/></button></div>
               </div>
             </HelpExample>

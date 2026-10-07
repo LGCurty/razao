@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.41 · compilado em 2026-10-07T00:30:56.110Z */
+   Versão 1.2.45 · compilado em 2026-10-07T00:45:11.139Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.41";
+const APP_VERSION = "1.2.45";
 const APP_BUILD = "2026-10-07";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -176,7 +176,8 @@ async function analyzeDocumentWithAI({
   accounts,
   model
 }) {
-  const categoryList = Object.entries(CATS).map(([t, cats]) => `- ${t}: ${cats.map(c => c[0]).join(", ")}`).join("\n");
+  // cada categoria vem com o que costuma entrar nela; a IA deve devolver só o nome, antes dos parênteses
+  const categoryList = Object.entries(CATS).map(([t, cats]) => `- ${t}: ${cats.map(c => catComDica(c[0])).join("; ")}`).join("\n") + "\n(Use exatamente o nome da categoria, sem o texto entre parênteses.)";
   const ehImagem = /^image\//.test(mimeType || "");
   const prompt = `Você é um analista financeiro brasileiro, meticuloso, que lê documentos bancários e os transforma em lançamentos estruturados. Leia o documento INTEIRO com atenção — todas as páginas — antes de responder. Nome do arquivo: "${fileName || "documento"}". Data de hoje: ${todayISO()}.
 ${ehImagem ? `
@@ -567,8 +568,8 @@ function lookupCategoryMemory(memory, description) {
 async function suggestCategoryWithAI(description, type) {
   const cats = CATS[type].map(c => c[0]);
   const prompt = `Descrição de um lançamento financeiro: "${description}". Tipo: ${TYPES[type].label}.
-Qual das categorias abaixo melhor descreve esse lançamento? Responda com o nome exato de uma delas.
-Opções: ${cats.join(", ")}`;
+Qual das categorias abaixo melhor descreve esse lançamento? Responda com o nome exato de uma delas (sem o texto entre parênteses).
+Opções: ${cats.map(catComDica).join("; ")}`;
   const schema = {
     type: "OBJECT",
     properties: {
@@ -1777,6 +1778,7 @@ function garantirContasPluggy(contas, accountsAtuais, connectorName) {
       id: uid(),
       name: nomeContaAutomatica(c, connectorName, atual),
       kind: pluggyKind(c),
+      bank: bancoDoNome(connectorName) || bancoDoNome(c.marketingName) || "Outro",
       color: CONTA_COLORS[atual.length % CONTA_COLORS.length],
       openingBalance: 0,
       openingDate: "",
@@ -1793,8 +1795,8 @@ function garantirContasPluggy(contas, accountsAtuais, connectorName) {
 
 /* O Pluggy devolve a categoria em inglês e com uma árvore própria; aqui ela vira uma das categorias
    que já existem no app. O que não casar cai em "Outros" e a pessoa ajusta na revisão. */
-const PLUGGY_CAT_GASTO = [[/food|drink|restaurant|supermarket|groceri|delivery|bakery|bar\b/i, "Alimentação"], [/transport|uber|taxi|ride|fuel|gas station|parking|toll|airline|flight|travel|public transport/i, "Transporte"], [/rent|housing|mortgage|condo|home improvement/i, "Moradia"], [/utilit|electric|water|internet|telecom|phone|mobile|bill|tax|insurance|bank fee|interest charge/i, "Contas"], [/health|pharmac|medic|dental|hospital|doctor|gym|fitness|wellness/i, "Saúde"], [/leisure|entertain|cinema|movie|game|hobby|sport|ticket|event/i, "Lazer"], [/shop|cloth|electronic|online|store|marketplace|department/i, "Compras"], [/educat|school|university|course|book|tuition/i, "Educação"], [/subscription|streaming|software|digital service/i, "Assinaturas"], [/\bpet|veterin/i, "Pets"]];
-const PLUGGY_CAT_GANHO = [[/salary|payroll|wage|paycheck/i, "Salário"], [/dividend|proceeds/i, "Proventos"], [/interest|yield|investment income|cashback|rewards/i, "Rendimento"], [/refund|reimburs|chargeback|reversal/i, "Reembolso"], [/freelanc|self.?employ/i, "Freelance"], [/gift|donation/i, "Presente"]];
+const PLUGGY_CAT_GASTO = [[/tax|insurance|bank fee|fees|interest charge|late payment|educat|school|university|course|tuition/i, "Obrigações"], [/food|drink|restaurant|supermarket|groceri|delivery|bakery|bar\b|shop|cloth|electronic|online|store|marketplace|department|\bpet|veterin|personal care|beauty/i, "Vida Diária"], [/transport|uber|taxi|ride|fuel|gas station|parking|toll|public transport|vehicle/i, "Transporte"], [/rent|housing|mortgage|condo|home improvement|utilit|electric|water|internet|telecom|phone|mobile|bill/i, "Moradia"], [/health|pharmac|medic|dental|hospital|doctor|gym|fitness|wellness/i, "Saúde"], [/leisure|entertain|cinema|movie|game|hobby|sport|ticket|event|subscription|streaming|software|digital service|travel|airline|flight|hotel|lodging/i, "Entretenimento"]];
+const PLUGGY_CAT_GANHO = [[/salary|payroll|wage|paycheck/i, "Salário Mensal"], [/dividend|proceeds|interest|yield|investment income/i, "Proventos"], [/freelanc|self.?employ|cashback|rewards|sale/i, "Renda extra"]];
 function pluggyCategoria(tipo, catPluggy, desc, categoryMemory) {
   const validas = CATS[tipo].map(c => c[0]);
   // o que a pessoa já corrigiu antes vale mais que qualquer palpite
@@ -2090,9 +2092,11 @@ async function syncPluggyConnection({
   });
   // saldo informado pelo próprio banco, por conta do app: é o que a Home usa como "saldo total" das contas
   // conectadas (o saldo calculado só pelos lançamentos importados não enxerga o que veio antes da janela)
-  const saldos = {};
+  const saldos = {},
+    contasDaConexao = [];
   contas.forEach(c => {
     const m = matchPluggyAccount(c, accountsComNovas);
+    if (m && m.id) contasDaConexao.push(m.id);
     if (m && m.id && pluggyKind(c) === "conta" && typeof c.balance === "number") saldos[m.id] = Math.round(c.balance * 100);
   });
   return {
@@ -2104,7 +2108,8 @@ async function syncPluggyConnection({
     docs,
     rows,
     ignorados,
-    saldos
+    saldos,
+    contasDaConexao
   };
 }
 
@@ -2128,7 +2133,7 @@ function pluggyRowToTx(it) {
 }
 const pluggyRowCompleta = it => it.acctId && it.cents > 0 && (it.type !== "transferencia" || it.toAcctId && it.toAcctId !== it.acctId);
 const SEED = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   theme: "dark",
   transactions: [],
   accounts: [{
@@ -2162,7 +2167,7 @@ const SEED = {
     pluggyReview: false
   }
 };
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 /* migrate() é idempotente: leva qualquer versão anterior (inclusive dados sem o campo schemaVersion,
    como um backup .json exportado antes desta mudança) até a atual. Nenhum campo existente é renomeado
    ou removido — só acrescentado, com um padrão seguro, só onde ainda não existir. Rodar duas vezes
@@ -2226,6 +2231,35 @@ function migrate(data) {
   };
   if (!AI_MODELS[d.settings.aiModel]) d.settings.aiModel = "rapido";
   if (!COLOR_THEME_MAP[d.settings.colorTheme]) d.settings.colorTheme = "aco";
+  // 6.0 — categorias da planilha: converte nomes antigos (lançamentos, orçamentos, exceções do mês,
+  // memória de categorização e metas ligadas). Orçamentos de categorias que viraram uma só somam o limite.
+  d.transactions = d.transactions.map(t => {
+    const c = novaCategoria(t.type, t.category);
+    return c === t.category ? t : {
+      ...t,
+      category: c
+    };
+  });
+  const fundirOrcamento = mapa => {
+    const out = {};
+    Object.entries(mapa || {}).forEach(([cat, v]) => {
+      const n = novaCategoria("gasto", cat);
+      out[n] = (out[n] || 0) + (Number(v) || 0);
+    });
+    return out;
+  };
+  d.budgets = fundirOrcamento(d.budgets);
+  d.budgetExceptions = Object.fromEntries(Object.entries(d.budgetExceptions || {}).map(([mk, m]) => [mk, fundirOrcamento(m)]));
+  d.categoryMemory = Object.fromEntries(Object.entries(d.categoryMemory || {}).map(([k, v]) => [k, novaCategoria("ganho", novaCategoria("gasto", v))]));
+  d.goals = d.goals.map(g => g.linkedCategory ? {
+    ...g,
+    linkedCategory: novaCategoria("ganho", g.linkedCategory)
+  } : g);
+  // 6.0 — banco de cada conta (BTG, Nubank…): deduz do nome quando der; o resto fica em branco até a pessoa escolher
+  d.accounts = d.accounts.map(a => a.bank !== undefined ? a : {
+    ...a,
+    bank: bancoDoNome(a.name)
+  });
   d.schemaVersion = SCHEMA_VERSION;
   return d;
 }
@@ -2350,12 +2384,12 @@ async function fetchServerUpdatedAt(userId) {
 /* ---- referência ---- */
 const TYPES = {
   gasto: {
-    label: "Gasto",
+    label: "Despesa",
     cls: "out",
     sign: -1
   },
   ganho: {
-    label: "Ganho",
+    label: "Renda",
     cls: "in",
     sign: +1
   },
@@ -2397,6 +2431,14 @@ const PAYMENT_METHODS = {
     label: "Transferência (TED/DOC)"
   }
 };
+function paymentMethodsFor(type) {
+  return type === "ganho" ? ["pix", "deposito", "ted", "dinheiro"] : ["pix", "credito", "debito", "dinheiro", "boleto"];
+}
+function defaultPaymentMethod(type, conta) {
+  if (type === "ganho") return "pix";
+  if (conta && conta.kind === "cartao") return "credito";
+  return "pix";
+}
 function paymentLabel(t, accounts) {
   if (t.paymentMethod && PAYMENT_METHODS[t.paymentMethod]) return PAYMENT_METHODS[t.paymentMethod].label;
   if (t.type === "transferencia") return "Transferência";
@@ -2405,12 +2447,55 @@ function paymentLabel(t, accounts) {
   return "—";
 }
 const isRealized = t => (t.status || "realizado") !== "previsto";
+/* categorias da planilha de referência. "Proventos" continua em Renda porque é ela que alimenta o
+   índice de Independência Financeira (renda passiva de investimentos). */
 const CATS = {
-  gasto: [["Alimentação", "alimentacao"], ["Transporte", "transporte"], ["Moradia", "moradia"], ["Contas", "contas-cat"], ["Saúde", "saude"], ["Lazer", "lazer"], ["Compras", "compras"], ["Educação", "educacao"], ["Assinaturas", "assinaturas"], ["Pets", "pets"], ["Outros", "outros"]],
-  ganho: [["Salário", "salario"], ["Freelance", "freelance"], ["Presente", "presente"], ["Reembolso", "reembolso"], ["Rendimento", "rendimento"], ["Proventos", "proventos"], ["Outros", "outros"]],
+  gasto: [["Moradia", "moradia"], ["Transporte", "transporte"], ["Vida Diária", "alimentacao"], ["Saúde", "saude"], ["Entretenimento", "lazer"], ["Obrigações", "contas-cat"], ["Outros", "outros"]],
+  ganho: [["Salário Mensal", "salario"], ["Renda extra", "freelance"], ["Proventos", "proventos"], ["Outros", "outros"]],
   investimento: [["Ações", "acoes"], ["Renda Fixa", "rendafixa"], ["Fundos", "fundos"], ["Cripto", "cripto"], ["Tesouro", "tesouro"], ["Previdência", "previdencia"], ["Outros", "outros"]]
 };
 const CAT_ICON = Object.fromEntries(Object.values(CATS).flat().map(([n, ic]) => [n, ic]));
+// o que entra em cada categoria — aparece como dica no formulário e ajuda a IA a classificar
+const CAT_HINT = {
+  "Moradia": "aluguel, condomínio, luz, água, gás, telefone, internet",
+  "Transporte": "combustível, Uber, ônibus, estacionamento, pedágio, manutenção do carro",
+  "Vida Diária": "supermercado, padaria, restaurante, roupas, salão, pet shop",
+  "Saúde": "plano de saúde, consultas, exames, remédios, academia",
+  "Entretenimento": "lazer, cinema, streaming, viagens, bares, hobbies",
+  "Obrigações": "impostos, taxas e tarifas, juros, anuidade, escola/faculdade, seguros",
+  "Salário Mensal": "salário, pró-labore",
+  "Renda extra": "freelance, bicos, vendas, cashback",
+  "Proventos": "dividendos, juros e rendimentos de investimentos"
+};
+const catComDica = n => CAT_HINT[n] ? `${n} (${CAT_HINT[n]})` : n;
+/* conversão das categorias antigas para as da planilha (schemaVersion 6). Só nomes antigos são chaves
+   aqui, então rodar de novo sobre dado já convertido não muda nada. */
+const CAT_MIGRACAO = {
+  gasto: {
+    "Alimentação": "Vida Diária",
+    "Compras": "Vida Diária",
+    "Pets": "Vida Diária",
+    "Lazer": "Entretenimento",
+    "Assinaturas": "Entretenimento",
+    "Contas": "Moradia",
+    "Educação": "Obrigações"
+  },
+  ganho: {
+    "Salário": "Salário Mensal",
+    "Freelance": "Renda extra",
+    "Presente": "Outros",
+    "Reembolso": "Outros",
+    "Rendimento": "Proventos"
+  }
+};
+const novaCategoria = (tipo, nome) => CAT_MIGRACAO[tipo] && CAT_MIGRACAO[tipo][nome] || nome;
+// bancos oferecidos no cadastro de conta (os quatro da planilha primeiro)
+const BANKS = ["BTG Pactual", "Nubank", "Bradesco", "Itaú", "Banco do Brasil", "Caixa", "Santander", "Inter", "C6 Bank", "Mercado Pago", "PicPay", "Outro"];
+const BANK_PATTERNS = [[/btg/i, "BTG Pactual"], [/nu ?bank|\bnu\b/i, "Nubank"], [/bradesco/i, "Bradesco"], [/ita[uú]/i, "Itaú"], [/banco do brasil|\bbb\b/i, "Banco do Brasil"], [/caixa/i, "Caixa"], [/santander/i, "Santander"], [/\binter\b/i, "Inter"], [/\bc6\b/i, "C6 Bank"], [/mercado ?pago/i, "Mercado Pago"], [/picpay/i, "PicPay"]];
+const bancoDoNome = txt => {
+  const m = BANK_PATTERNS.find(([re]) => re.test(String(txt || "")));
+  return m ? m[1] : "";
+};
 const CLASSES = ["Renda Fixa", "Renda Variável", "Fundos", "Cripto", "Tesouro", "Previdência", "Outros"];
 // paleta qualitativa (nunca usa o acento para valor semântico de entrada/saída/investimento — só para identidade de categoria)
 const QUALITATIVE = ["#F76B3C", "#5A8DEE", "#2FB98A", "#E8B23C", "#A57BE0", "#E2564D", "#46B7C7", "#8C93A8"];
@@ -3822,6 +3907,189 @@ function RecoverySetPassword({
 }
 
 /* =========================== APP =========================== */
+/* ---- espelho relacional (tabelas bank_accounts, movements e budgets no Supabase) ----
+   finance_data continua sendo a fonte principal. Depois de cada salvamento confirmado, a mesma informação
+   vai, normalizada, para as tabelas relacionais (ver supabase/migrations) — só o que mudou desde a última
+   vez, e o que sumiu daqui é apagado lá. Serve para consultar por SQL (Power BI, relatórios) e para a
+   sincronização do Open Finance no servidor. Se as tabelas ainda não foram criadas, o espelho se desliga
+   sozinho naquela sessão, sem erro nenhum para a pessoa. */
+const MIRROR_TABLES = ["bank_accounts", "movements", "budgets"];
+const MIRROR_CHUNK = 500;
+function isMissingTableError(err) {
+  const m = String(err && err.message || "");
+  return Boolean(err) && (err.code === "42P01" || err.code === "PGRST205" || /does not exist|could not find the table|schema cache/i.test(m));
+}
+const finalDaConta = a => {
+  const k = (a.matchKeys || [])[0];
+  return k ? String(k).split(":").pop() : null;
+};
+function mirrorRows(data, userId) {
+  const accounts = data.accounts || [],
+    txs = data.transactions || [];
+  const itens = data.pluggy && data.pluggy.items || [];
+  const bank_accounts = saldosPorConta(txs, accounts).map(a => {
+    const item = a.pluggyItemId ? itens.find(i => i.id === a.pluggyItemId) : null;
+    return {
+      user_id: userId,
+      id: String(a.id),
+      name: a.name || "Conta",
+      bank_name: a.bank || null,
+      kind: a.kind === "cartao" ? "cartao" : "conta",
+      account_number: finalDaConta(a),
+      balance: a.saldo / 100,
+      opening_balance: (a.openingBalance || 0) / 100,
+      pluggy_item_id: a.pluggyItemId || null,
+      last_sync: item && item.lastSyncAt || null,
+      sync_status: item ? item.lastError ? "error" : item.lastSyncAt ? "active" : "pending" : null,
+      error_message: item && item.lastError || null
+    };
+  });
+  const extVistos = new Set();
+  const movements = txs.filter(t => t && t.id && TYPES[t.type] && DATE_RE.test(t.date || "")).map(t => {
+    // o índice único (usuário, external_id) não aceita repetição: um id do banco duplicado por dado antigo fica só no primeiro
+    let ext = t.pluggyId || null;
+    if (ext) {
+      if (extVistos.has(ext)) ext = null;else extVistos.add(ext);
+    }
+    return {
+      user_id: userId,
+      id: String(t.id),
+      bank_account_id: t.acctId || null,
+      to_account_id: t.type === "transferencia" ? t.toAcctId || null : null,
+      type: t.type,
+      category: t.category || null,
+      amount: (t.type === "ganho" ? 1 : -1) * (t.cents || 0) / 100,
+      payment_method: t.paymentMethod || null,
+      date: t.date,
+      description: t.description || null,
+      status: isRealized(t) ? "realizado" : "previsto",
+      source: t.source || (t.pluggyId ? "pluggy_sync" : "manual"),
+      external_id: ext,
+      series_id: t.seriesId || null
+    };
+  });
+  const budgets = [];
+  Object.entries(data.budgets || {}).forEach(([cat, v]) => {
+    if (v > 0) budgets.push({
+      user_id: userId,
+      id: `${cat}|padrao`,
+      category: cat,
+      limit_amount: v / 100,
+      month_year: "padrao"
+    });
+  });
+  Object.entries(data.budgetExceptions || {}).forEach(([mk, m]) => Object.entries(m || {}).forEach(([cat, v]) => {
+    if (v > 0) budgets.push({
+      user_id: userId,
+      id: `${cat}|${mk}`,
+      category: cat,
+      limit_amount: v / 100,
+      month_year: mk
+    });
+  }));
+  return {
+    bank_accounts,
+    movements,
+    budgets
+  };
+}
+async function mirrorFetchIds(table, userId) {
+  const ids = [];
+  for (let de = 0; de < 200000; de += 1000) {
+    const {
+      data,
+      error
+    } = await sb.from(table).select("id").eq("user_id", userId).range(de, de + 999);
+    if (error) throw error;
+    (data || []).forEach(r => ids.push(r.id));
+    if (!data || data.length < 1000) break;
+  }
+  return ids;
+}
+async function syncMirror(userId, data, cache) {
+  if (!sb || !userId || !cache) return;
+  if (cache.userId !== userId) {
+    Object.assign(cache, {
+      userId,
+      available: null,
+      last: null,
+      status: "",
+      error: "",
+      at: 0
+    });
+  }
+  if (cache.available === false) return;
+  if (cache.running) {
+    cache.pending = data;
+    return;
+  }
+  cache.running = true;
+  try {
+    if (cache.available == null) {
+      const probe = await sb.from("movements").select("id").limit(1);
+      if (probe.error) {
+        if (isMissingTableError(probe.error)) {
+          cache.available = false;
+          cache.status = "ausente";
+          return;
+        }
+        throw probe.error;
+      }
+      cache.available = true;
+      cache.last = {};
+      for (const t of MIRROR_TABLES) cache.last[t] = new Map((await mirrorFetchIds(t, userId)).map(id => [id, null]));
+    }
+    const rows = mirrorRows(data, userId);
+    for (const t of MIRROR_TABLES) {
+      const antes = cache.last[t],
+        depois = new Map(),
+        mudou = [];
+      for (const r of rows[t]) {
+        if (depois.has(r.id)) continue;
+        const j = JSON.stringify(r);
+        depois.set(r.id, j);
+        if (antes.get(r.id) !== j) mudou.push(r);
+      }
+      const sumiram = [...antes.keys()].filter(id => !depois.has(id));
+      // apaga antes de gravar: um lançamento do banco removido e reimportado com outro id não esbarra no índice único
+      for (let i = 0; i < sumiram.length; i += MIRROR_CHUNK) {
+        const {
+          error
+        } = await sb.from(t).delete().eq("user_id", userId).in("id", sumiram.slice(i, i + MIRROR_CHUNK));
+        if (error) throw error;
+      }
+      for (let i = 0; i < mudou.length; i += MIRROR_CHUNK) {
+        const {
+          error
+        } = await sb.from(t).upsert(mudou.slice(i, i + MIRROR_CHUNK), {
+          onConflict: "user_id,id"
+        });
+        if (error) throw error;
+      }
+      cache.last[t] = depois;
+    }
+    cache.status = "ok";
+    cache.error = "";
+    cache.at = Date.now();
+  } catch (err) {
+    cache.status = "erro";
+    cache.error = err && err.message || String(err);
+    console.warn("Espelho relacional não sincronizou:", err);
+  } finally {
+    cache.running = false;
+    if (cache.onChange) cache.onChange({
+      status: cache.status,
+      error: cache.error,
+      at: cache.at
+    });
+    if (cache.pending) {
+      const proximo = cache.pending;
+      cache.pending = null;
+      syncMirror(userId, proximo, cache);
+    }
+  }
+}
+
 /* ---- sincronização automática do Open Finance (Pluggy) ----
    Roda enquanto o app está aberto e logado: ao abrir, e a cada 5 minutos confere quais conexões
    passaram de 6h sem atualizar e busca só essas, em sequência. Falha de rede ou do banco ganha nova
@@ -3889,11 +4157,20 @@ function usePluggyAutoSync({
         const conhecidos = new Set(dd.transactions.filter(t => t.pluggyId).map(t => t.pluggyId));
         const add = prontos.filter(t => !t.pluggyId || !conhecidos.has(t.pluggyId));
         const contasNovas = r.novas.filter(a => !dd.accounts.some(x => x.id === a.id));
-        const accounts = [...dd.accounts, ...contasNovas].map(a => r.saldos[a.id] !== undefined ? {
-          ...a,
-          bankBalance: r.saldos[a.id],
-          bankBalanceAt: agora
-        } : a);
+        const daConexao = new Set(r.contasDaConexao || []);
+        const accounts = [...dd.accounts, ...contasNovas].map(a => {
+          let n = a;
+          if (daConexao.has(a.id) && a.pluggyItemId !== conexao.id) n = {
+            ...n,
+            pluggyItemId: conexao.id
+          };
+          if (r.saldos[a.id] !== undefined) n = {
+            ...n,
+            bankBalance: r.saldos[a.id],
+            bankBalanceAt: agora
+          };
+          return n;
+        });
         return {
           transactions: [...add, ...dd.transactions],
           accounts,
@@ -4211,6 +4488,13 @@ function App() {
   const saveTimer = useRef(null);
   const retryTimer = useRef(null);
   const saveInFlightRef = useRef(false); // um salvamento está a caminho do servidor agora
+  const mirrorRef = useRef({}); // estado do espelho relacional (tabelas do Supabase)
+  const [mirrorStatus, setMirrorStatus] = useState({
+    status: "",
+    error: "",
+    at: 0
+  });
+  mirrorRef.current.onChange = setMirrorStatus;
   const skipNextSaveRef = useRef(false); // os dados acabaram de VIR do servidor: não há o que salvar de volta
   const lastKnownUpdatedAtRef = useRef(null);
   const dirtyRef = useRef(false); // há alteração ainda não confirmada como salva (para o aviso de beforeunload)
@@ -4353,6 +4637,8 @@ function App() {
           }));
         } catch (_) {}
       }
+      // espelho relacional: fora do caminho crítico — falhar aqui nunca impede nem desfaz o salvamento principal
+      if (sb && userId) syncMirror(userId, dataToSave, mirrorRef.current);
     } catch (err) {
       console.error(err);
       setSaveState("erro");
@@ -5272,7 +5558,19 @@ function App() {
     size: 14
   }), " Apagar transações, contas e cartões"), /*#__PURE__*/React.createElement("div", {
     className: "sheetdivider"
-  }), /*#__PURE__*/React.createElement("div", {
+  }), sb && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 6
+    }
+  }, "Tabelas relacionais no Supabase"), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 0
+    }
+  }, mirrorStatus.status === "ok" ? `Sincronizadas ${tempoDesde(new Date(mirrorStatus.at).toISOString())}: contas, movimentos e orçamentos ficam também em bank_accounts, movements e budgets, prontos para consulta por SQL.` : mirrorStatus.status === "ausente" ? "Ainda não instaladas. Rode uma vez o arquivo supabase/migrations/20261007000000_tabelas_relacionais.sql no SQL Editor do Supabase; até lá o app segue normal, só com o registro principal." : mirrorStatus.status === "erro" ? `A última cópia para as tabelas falhou (${mirrorStatus.error}). Seus dados principais estão salvos; o app tenta de novo no próximo salvamento.` : "Conferindo na próxima vez que algo for salvo…"), /*#__PURE__*/React.createElement("div", {
+    className: "sheetdivider"
+  })), /*#__PURE__*/React.createElement("div", {
     className: "sub",
     style: {
       marginBottom: 8
@@ -5388,7 +5686,7 @@ function App() {
   }), /*#__PURE__*/React.createElement("span", null, "Novo movimento")), /*#__PURE__*/React.createElement(Sheet, {
     open: sheetOpen,
     onClose: () => setSheetOpen(false),
-    title: sheetEditTx ? "Editar lançamento" : "Novo lançamento",
+    title: sheetEditTx ? "Editar movimento" : "Novo movimento",
     returnFocusRef: isDesktop ? fabDeskRef : fabRef
   }, /*#__PURE__*/React.createElement(TransactionForm, {
     accounts: accounts,
@@ -5489,7 +5787,7 @@ function TransactionForm({
 }) {
   const [type, setType] = useState(editTx ? editTx.type : "gasto");
   const [cents, setCents] = useState(editTx ? editTx.cents : 0);
-  const [cat, setCat] = useState(editTx ? editTx.category || CATS.gasto[0][0] : "Alimentação");
+  const [cat, setCat] = useState(editTx ? editTx.category || CATS.gasto[0][0] : CATS.gasto[0][0]);
   const [desc, setDesc] = useState(editTx ? editTx.description : "");
   const [date, setDate] = useState(editTx ? editTx.date : todayISO());
   const [acctId, setAcctId] = useState(editTx ? editTx.acctId || accounts[0]?.id || "" : accounts[0]?.id || "");
@@ -5499,6 +5797,10 @@ function TransactionForm({
   const [repeatTimes, setRepeatTimes] = useState(2);
   const [catManual, setCatManual] = useState(!!editTx);
   const [catSuggestBusy, setCatSuggestBusy] = useState(false);
+  // método de pagamento: sugerido pela conta (cartão → crédito) até a pessoa escolher na mão
+  const [pay, setPay] = useState(editTx ? editTx.paymentMethod || "" : "");
+  const [payManual, setPayManual] = useState(Boolean(editTx && editTx.paymentMethod));
+  const [tentou, setTentou] = useState(false); // só mostra os erros depois da primeira tentativa de salvar
   const formRef = useRef(null);
   const descTimer = useRef(null);
   const editId = editTx ? editTx.id : null;
@@ -5541,10 +5843,26 @@ function TransactionForm({
   }, [desc, type, catManual, editId, categoryMemory]);
   const isTransfer = type === "transferencia";
   const transferInvalid = isTransfer && (!toAcctId || acctId === toAcctId);
+  const contaAtual = accounts.find(a => a.id === acctId);
+  const metodos = paymentMethodsFor(type);
+  useEffect(() => {
+    if (payManual || isTransfer) return;
+    setPay(defaultPaymentMethod(type, contaAtual));
+  }, [type, acctId, payManual]);
+  // validação do roteiro: valor > 0, categoria, conta e método obrigatórios; movimento avulso novo não pode
+  // ficar no futuro (conta futura entra por "Repetir / Parcelar", que já cria os previstos dos próximos meses)
+  const erros = [];
+  if (!(cents > 0)) erros.push("Informe um valor maior que zero.");
+  if (!isTransfer && !cat) erros.push("Escolha uma categoria.");
+  if (accounts.length === 0) erros.push("Cadastre uma conta em Configurações › Contas e bancos.");else if (!acctId) erros.push("Escolha o banco/conta.");
+  if (!isTransfer && !pay) erros.push("Escolha o método de pagamento.");
+  if (transferInvalid) erros.push("A conta de origem e a de destino devem ser diferentes.");
+  if (!DATE_RE.test(date || "")) erros.push("Informe a data.");else if (!editId && !repeat && date > todayISO()) erros.push("A data não pode estar no futuro. Para contas que ainda vão vencer, use \"Repetir / Parcelar\".");
   function submit() {
-    if (cents <= 0) return;
-    if (transferInvalid) return;
+    setTentou(true);
+    if (erros.length) return;
     const entryCat = isTransfer ? "" : cat;
+    const entryPay = isTransfer ? undefined : pay;
     const entryToAcct = isTransfer ? toAcctId : undefined;
     const today = todayISO();
     // memória de categorização: toda vez que um lançamento com descrição é salvo, guarda a categoria escolhida
@@ -5572,6 +5890,8 @@ function TransactionForm({
           date: d,
           acctId,
           toAcctId: entryToAcct,
+          paymentMethod: entryPay,
+          source: "manual",
           status: d > today ? "previsto" : "realizado",
           seriesId: sId,
           seriesIndex: i,
@@ -5590,6 +5910,8 @@ function TransactionForm({
           date: d,
           acctId,
           toAcctId: entryToAcct,
+          paymentMethod: entryPay,
+          source: "manual",
           status: d > today ? "previsto" : "realizado",
           seriesId: sId,
           seriesIndex: i,
@@ -5605,11 +5927,14 @@ function TransactionForm({
       setRepeat(false);
       setRepeatTimes(2);
       setCatManual(false);
+      setTentou(false);
       formRef.current?.querySelector("input")?.focus();
       onDone && onDone();
       return;
     }
     const entry = {
+      ...(editTx || {}),
+      // edição preserva o que o formulário não mostra (id do banco, origem, tags de série…)
       id: editId || uid(),
       type,
       cents,
@@ -5618,6 +5943,8 @@ function TransactionForm({
       date,
       acctId,
       toAcctId: entryToAcct,
+      paymentMethod: entryPay,
+      source: editTx && editTx.source || "manual",
       status: editId ? editTx.status || "realizado" : date > today ? "previsto" : "realizado",
       ...(editId ? {
         seriesId: editTx.seriesId,
@@ -5638,7 +5965,8 @@ function TransactionForm({
             cents: entry.cents,
             category: entry.category,
             acctId: entry.acctId,
-            toAcctId: entry.toAcctId
+            toAcctId: entry.toAcctId,
+            paymentMethod: entry.paymentMethod
           };
           return t;
         })
@@ -5648,10 +5976,11 @@ function TransactionForm({
         transactions: editId ? d.transactions.map(t => t.id === editId ? entry : t) : [entry, ...d.transactions]
       }));
     }
-    toast(editId ? "Lançamento atualizado." : "Lançamento adicionado.", "success");
+    toast(editId ? "Movimento atualizado." : "Movimento salvo.", "success");
     setCents(0);
     setDesc("");
     setCatManual(false);
+    setTentou(false);
     formRef.current?.querySelector("input")?.focus();
     onDone && onDone();
   }
@@ -5697,7 +6026,9 @@ function TransactionForm({
     size: 12
   }), /*#__PURE__*/React.createElement("span", {
     className: "shimmer"
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), !isTransfer && CAT_HINT[cat] && /*#__PURE__*/React.createElement("p", {
+    className: "hint cathint"
+  }, cat, ": ", CAT_HINT[cat]), /*#__PURE__*/React.createElement("div", {
     className: "row2"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -5754,12 +6085,29 @@ function TransactionForm({
     className: "fld",
     type: "date",
     value: date,
+    max: !editId && !repeat ? todayISO() : undefined,
     onChange: e => setDate(e.target.value),
     style: {
       flex: "0 0 auto",
       maxWidth: 160
+    },
+    "aria-label": "Data"
+  })), !isTransfer && /*#__PURE__*/React.createElement("div", {
+    className: "row2"
+  }, /*#__PURE__*/React.createElement("select", {
+    className: "fld",
+    "aria-label": "Método de pagamento",
+    value: pay,
+    onChange: e => {
+      setPay(e.target.value);
+      setPayManual(true);
     }
-  })), isTransfer && transferInvalid && /*#__PURE__*/React.createElement("p", {
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Método de pagamento…"), metodos.map(k => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, PAYMENT_METHODS[k].label)))), isTransfer && transferInvalid && !tentou && /*#__PURE__*/React.createElement("p", {
     className: "hint",
     style: {
       color: "var(--neg)"
@@ -5800,11 +6148,21 @@ function TransactionForm({
         marginBottom: 14
       }
     }, repeatMode === "parcelado" ? /*#__PURE__*/React.createElement(React.Fragment, null, "Serão criados ", n, " lançamentos de ~", brl(Math.round(cents / n)), " cada, de ", fmtDateBR(date), " até ", fmtDateBR(addMonthsISO(date, n - 1)), ".") : /*#__PURE__*/React.createElement(React.Fragment, null, "Serão criados ", n, " lançamentos de ", brl(cents), " cada, de ", fmtDateBR(date), " até ", fmtDateBR(addMonthsISO(date, n - 1)), "."));
-  })(), /*#__PURE__*/React.createElement("button", {
+  })(), tentou && erros.length > 0 && /*#__PURE__*/React.createElement("ul", {
+    className: "formerrs",
+    role: "alert"
+  }, erros.map(e => /*#__PURE__*/React.createElement("li", {
+    key: e
+  }, e))), /*#__PURE__*/React.createElement("div", {
+    className: "formactions"
+  }, onDone && /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "sbtn",
+    onClick: onDone
+  }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
     className: "submit",
-    onClick: submit,
-    disabled: cents <= 0 || transferInvalid
-  }, editId ? "Salvar alterações" : repeat ? `Criar ${Math.max(2, parseInt(repeatTimes, 10) || 2)} lançamentos` : "Salvar lançamento"));
+    onClick: submit
+  }, editId ? "Salvar alterações" : repeat ? `Criar ${Math.max(2, parseInt(repeatTimes, 10) || 2)} lançamentos` : "Salvar")));
 }
 
 /* ---------- BALANÇO ---------- */
@@ -6034,7 +6392,7 @@ const AI_SUMMARY_STYLE = `Escreva em português do Brasil, na segunda pessoa ("v
 REGRAS:
 - Use SOMENTE os números do JSON. Nunca invente valor, categoria ou lançamento que não esteja lá.
 - Sempre que citar um número, dê o contexto: quanto foi, quanto era antes, quantos por cento mudou.
-- Prefira a causa concreta ("Lazer subiu 62% por causa dos R$ 380 do dia 12") ao efeito genérico ("os gastos aumentaram").
+- Prefira a causa concreta ("Entretenimento subiu 62% por causa dos R$ 380 do dia 12") ao efeito genérico ("os gastos aumentaram").
 - Se o mês ainda está em andamento (mesEmAndamento = true), fale em ritmo e projeção, não em fechamento.
 - Se faltar dado para alguma seção, diga isso em uma linha em vez de encher linguiça.
 - Valores em reais no formato R$ 1.234,56.
@@ -6190,7 +6548,13 @@ function Balanco({
       });
       return;
     }
-    doRequestDelete([t.id], t);
+    // confirma antes; e mesmo depois de confirmar ainda dá para desfazer pelo aviso por alguns segundos
+    askConfirm({
+      title: "Excluir movimento?",
+      message: `"${t.description || t.category || TYPES[t.type].label}" de ${brl(t.cents)} em ${fmtDateBR(t.date)} será excluído.`,
+      confirmLabel: "Excluir",
+      onConfirm: () => doRequestDelete([t.id], t)
+    });
   }
   function markAsPaid(t) {
     update(d => ({
@@ -9384,6 +9748,7 @@ function Contas({
   const blank = {
     name: "",
     kind: "conta",
+    bank: "",
     color: "#3B63C4",
     closingDay: "",
     dueDay: "",
@@ -9470,12 +9835,29 @@ function Contas({
     value: form.name,
     onChange: e => setForm({
       ...form,
-      name: e.target.value
+      name: e.target.value,
+      bank: form.bank || bancoDoNome(e.target.value)
     }),
     style: {
       marginBottom: 10
     }
-  }), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("select", {
+    className: "fld",
+    "aria-label": "Banco",
+    value: form.bank || "",
+    onChange: e => setForm({
+      ...form,
+      bank: e.target.value
+    }),
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Banco…"), BANKS.map(b => /*#__PURE__*/React.createElement("option", {
+    key: b,
+    value: b
+  }, b))), /*#__PURE__*/React.createElement("div", {
     className: "seg",
     style: {
       marginBottom: 10
@@ -9638,7 +10020,7 @@ function Contas({
       className: "aname"
     }, a.name), /*#__PURE__*/React.createElement("div", {
       className: "akind"
-    }, a.kind === "cartao" ? /*#__PURE__*/React.createElement(React.Fragment, null, "Cartão", a.closingDay ? ` · fecha dia ${a.closingDay}` : "", a.dueDay ? ` · vence dia ${a.dueDay}` : "", " · fatura do mês ", inv.net === 0 && inv.gasto > 0 ? "quitada" : brl(inv.net), inv.credit > 0 ? ` · ${brl(inv.credit)} pagos a mais` : "") : "Conta", a.openingBalance ? /*#__PURE__*/React.createElement(React.Fragment, null, " · saldo inicial ", brl(a.openingBalance), a.openingDate ? ` em ${fmtDateBR(a.openingDate)}` : "") : "")), a.kind === "cartao" && /*#__PURE__*/React.createElement("button", {
+    }, a.bank && a.bank !== "Outro" ? `${a.bank} · ` : "", a.kind === "cartao" ? /*#__PURE__*/React.createElement(React.Fragment, null, "Cartão", a.closingDay ? ` · fecha dia ${a.closingDay}` : "", a.dueDay ? ` · vence dia ${a.dueDay}` : "", " · fatura do mês ", inv.net === 0 && inv.gasto > 0 ? "quitada" : brl(inv.net), inv.credit > 0 ? ` · ${brl(inv.credit)} pagos a mais` : "") : "Conta", a.openingBalance ? /*#__PURE__*/React.createElement(React.Fragment, null, " · saldo inicial ", brl(a.openingBalance), a.openingDate ? ` em ${fmtDateBR(a.openingDate)}` : "") : "")), a.kind === "cartao" && /*#__PURE__*/React.createElement("button", {
       className: "sbtn iconsbtn",
       "aria-label": "Auditar fatura",
       onClick: () => openAudit(a)
@@ -9963,7 +10345,7 @@ function parseExtratoText(text) {
       desc: desc.trim(),
       cents,
       type,
-      category: CATS[type][0][0],
+      category: CATS[type][CATS[type].length - 1][0],
       acctId: ""
     });
   });
@@ -11799,7 +12181,7 @@ const DEMO_DATA = (() => {
     id: "demo-t1",
     type: "ganho",
     cents: 450000,
-    category: "Salário",
+    category: "Salário Mensal",
     description: "Salário",
     date: d(20),
     acctId: acc1.id,
@@ -11808,7 +12190,7 @@ const DEMO_DATA = (() => {
     id: "demo-t2",
     type: "gasto",
     cents: 8900,
-    category: "Alimentação",
+    category: "Vida Diária",
     description: "Mercado #casa",
     date: d(18),
     acctId: acc1.id,
@@ -11826,7 +12208,7 @@ const DEMO_DATA = (() => {
     id: "demo-t4",
     type: "gasto",
     cents: 5500,
-    category: "Lazer",
+    category: "Entretenimento",
     description: "Cinema",
     date: d(10),
     acctId: acc2.id,
@@ -11863,15 +12245,15 @@ const DEMO_DATA = (() => {
     id: "demo-t8",
     type: "ganho",
     cents: 15000,
-    category: "Freelance",
+    category: "Renda extra",
     description: "Bico de fim de semana",
     date: iso(new Date(today.getTime() + 3 * 86400000)),
     acctId: acc1.id,
     status: "previsto"
   }];
   const budgets = {
-    "Alimentação": 100000,
-    "Lazer": 40000
+    "Vida Diária": 100000,
+    "Entretenimento": 40000
   };
   const goals = [{
     id: "demo-g1",
@@ -12013,7 +12395,7 @@ function SwipeDiagram() {
     fontSize: "10",
     fill: "var(--text-mut)",
     fontFamily: "Inter,sans-serif"
-  }, "Alimentação"), /*#__PURE__*/React.createElement("rect", {
+  }, "Vida Diária"), /*#__PURE__*/React.createElement("rect", {
     x: "238",
     y: "8",
     width: "78",
@@ -12488,7 +12870,7 @@ function Ajuda({
     n: 2,
     title: "Registrar lançamentos",
     purpose: "Os quatro tipos de lançamento e os campos do formulário.",
-    steps: ["Escolha o tipo: Gasto, Ganho, Investimento ou Transferência.", "Digite o valor sem vírgula — os dois últimos dígitos viram os centavos automaticamente (ex: 1590 vira R$ 15,90).", "Escolha a categoria, ou deixe a IA sugerir enquanto você digita a descrição (ela também aprende com o que você já categorizou antes).", "Use #tags na descrição pra marcar lançamentos que quer acompanhar juntos depois (ex: #viagem) — elas viram chips clicáveis na lista.", "Marque \"Repetir / Parcelar\" pra criar vários lançamentos de uma vez: fixo repete o mesmo valor todo mês, parcelado divide o valor total."],
+    steps: ["Escolha o tipo: Despesa, Renda, Investimento ou Transferência. Depois o valor, a categoria, o banco/conta, a data e o método de pagamento (Pix, crédito, débito, dinheiro, boleto…) — o método já vem sugerido pela conta.", "Digite o valor sem vírgula — os dois últimos dígitos viram os centavos automaticamente (ex: 1590 vira R$ 15,90).", "Escolha a categoria, ou deixe a IA sugerir enquanto você digita a descrição (ela também aprende com o que você já categorizou antes).", "Use #tags na descrição pra marcar lançamentos que quer acompanhar juntos depois (ex: #viagem) — elas viram chips clicáveis na lista.", "Marque \"Repetir / Parcelar\" pra criar vários lançamentos de uma vez: fixo repete o mesmo valor todo mês, parcelado divide o valor total."],
     tip: "No celular, arraste um lançamento da lista para a esquerda pra revelar os botões de editar e excluir."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "formulário de lançamento"
@@ -12634,7 +13016,7 @@ function Ajuda({
     n: 7,
     title: "Investimentos",
     purpose: "Cadastrar sua carteira, acompanhar aportes, proventos e indicadores de mercado.",
-    steps: ["Cadastre cada ativo com o valor aplicado e o valor atual — a diferença é o rendimento.", "Lançamentos do tipo Investimento contam como aporte do mês; do tipo Ganho na categoria \"Proventos\" contam como provento.", "Selic, CDI e IPCA (Banco Central) aparecem na Home, atualizados uma vez por dia.", "Independência Financeira mostra quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios."],
+    steps: ["Cadastre cada ativo com o valor aplicado e o valor atual — a diferença é o rendimento.", "Lançamentos do tipo Investimento contam como aporte do mês; do tipo Renda na categoria \"Proventos\" contam como provento.", "Selic, CDI e IPCA (Banco Central) aparecem na Home, atualizados uma vez por dia.", "Independência Financeira mostra quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios."],
     tip: "100% de Independência Financeira significa: se você parasse de trabalhar, os proventos médios sozinhos cobririam seus gastos médios."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "composição da carteira"
@@ -12743,7 +13125,7 @@ function Ajuda({
     style: {
       marginTop: 4
     }
-  }, "Vira gasto em Alimentação, no Cartão Roxo.")))))), visible("assistente-ajuda") && /*#__PURE__*/React.createElement(HelpSection, {
+  }, "Vira despesa em Vida Diária, no Cartão Roxo.")))))), visible("assistente-ajuda") && /*#__PURE__*/React.createElement(HelpSection, {
     id: "assistente-ajuda",
     n: 9,
     title: "Assistente",
@@ -12758,13 +13140,13 @@ function Ajuda({
       fontWeight: 600,
       marginBottom: 4
     }
-  }, "Você perguntou: quanto gastei com Alimentação esse mês?"), /*#__PURE__*/React.createElement("div", {
+  }, "Você perguntou: quanto gastei com Vida Diária esse mês?"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 14,
       lineHeight: 1.6,
       color: "var(--text-mut)"
     }
-  }, "No exemplo, R$ 89,00 em Alimentação — um único lançamento, o mercado do dia 18."))), visible("busca-filtros") && /*#__PURE__*/React.createElement(HelpSection, {
+  }, "No exemplo, R$ 89,00 em Vida Diária — um único lançamento, o mercado do dia 18."))), visible("busca-filtros") && /*#__PURE__*/React.createElement(HelpSection, {
     id: "busca-filtros",
     n: 10,
     title: "Busca e filtros",
@@ -12780,7 +13162,7 @@ function Ajuda({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "filterchip"
-  }, /*#__PURE__*/React.createElement("span", null, "Categoria: Alimentação"), /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("span", null, "Categoria: Vida Diária"), /*#__PURE__*/React.createElement("button", {
     "aria-label": "Remover",
     type: "button",
     tabIndex: -1
