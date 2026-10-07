@@ -123,7 +123,7 @@ const HELP_SECTIONS=[
   {id:"assistente-ajuda",n:9,title:"Assistente",kw:"assistente perguntar pergunta ia inteligência artificial"},
   {id:"busca-filtros",n:10,title:"Busca e filtros",kw:"busca buscar filtro filtros chip categoria conta data valor status previsto realizado tag"},
   {id:"panorama-ajuda",n:11,title:"Home e Panorama",kw:"home resumo panorama menu busca buscar lupa patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"},
-  {id:"backup-seguranca",n:12,title:"Backup e segurança",kw:"backup exportar importar json csv mesclar substituir segurança senha dados bancários"},
+  {id:"backup-seguranca",n:12,title:"Exportação, backup e segurança",kw:"exportação excel xlsx planilha relatório pdf imprimir compartilhar whatsapp backup exportar importar json csv mesclar substituir segurança senha dados bancários"},
   {id:"faq",n:13,title:"Perguntas frequentes",kw:"saldo não bate fatura sumiu esqueci senha offline internet dúvida"},
 ];
 function HelpSection({ id, n, title, purpose, steps, tip, children }){
@@ -454,9 +454,12 @@ function Ajuda({ helpTarget, onConsumeTarget }){
           </HelpSection>}
 
         {visible("backup-seguranca") &&
-          <HelpSection id="backup-seguranca" n={12} title="Backup e segurança"
+          <HelpSection id="backup-seguranca" n={12} title="Exportação, backup e segurança"
             purpose="Como exportar, importar e onde os seus dados realmente ficam."
             steps={[
+              "Menu ☰ › Ferramentas › Exportação: escolha o período (mês aberto, intervalo ou tudo), tipo, conta, categoria e status, e baixe em Excel (.xlsx, já com datas, valores em R$, filtro e cabeçalho fixo) ou CSV. No celular dá para mandar direto pelo compartilhamento (WhatsApp, Drive, e-mail).",
+              "Relatório do mês em PDF: resumo, orçamento, gastos por categoria, saldos e todos os lançamentos do mês aberto. Abre a impressão do aparelho — escolha \"Salvar como PDF\".",
+              "Em Lançamentos, o botão de baixar ao lado de Lista/Cartões exporta exatamente o que está na tela (resultado da busca e dos filtros).",
               "Exporte um backup .json completo (dá pra reimportar depois) ou um .csv (pra abrir em planilha).",
               "Ao importar um backup, escolha Mesclar (soma ao que já existe) ou Substituir tudo (apaga o atual e usa só o importado — pede confirmação digitada).",
               "Com conta na nuvem, os dados ficam no banco de dados do projeto (Supabase); em Modo local, ficam só neste aparelho.",

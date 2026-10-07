@@ -7,7 +7,7 @@ const NAV_SECTIONS = [
   { key:"gastos", label:"Gastos", icon:"calendario", views:[["balanco","Lançamentos"],["extrato","Importar do banco"]] },
   { key:"orcamento", label:"Orçamento", icon:"orcamento", views:[["orcamento","Orçamento"]] },
   { key:"investimentos", label:"Investimentos", icon:"investimentos", views:[["investimentos","Carteira"],["metas","Metas"]] },
-  { key:"config", label:"Configurações", icon:"config", views:[["contas","Contas e bancos"],["preferencias","Preferências"],["ajuda","Ajuda"]] },
+  { key:"config", label:"Configurações", icon:"config", views:[["contas","Contas e bancos"],["preferencias","Preferências"],["exportar","Exportação"],["ajuda","Ajuda"]] },
 ];
 const sectionOfView = (v)=>NAV_SECTIONS.find(sec=>sec.views.some(([k])=>k===v))||NAV_SECTIONS[0];
 
@@ -35,6 +35,7 @@ const NAV_GROUPS = [
   ]},
   { label:"Ferramentas", items:[
     { action:"novo", label:"Novo movimento", icon:"adicionar" },
+    { view:"exportar", label:"Exportação", icon:"baixar" },
     { view:"perguntar", label:"Assistente IA", icon:"assistente" },
     { view:"ajuda", label:"Manual do usuário", icon:"livro" },
   ]},
@@ -48,7 +49,7 @@ const NAV_GROUPS = [
 const VIEW_TITLES = {
   geral:"Home", panorama:"Panorama", balanco:"Lançamentos", extrato:"Importar do banco", orcamento:"Orçamento",
   investimentos:"Carteira", metas:"Metas", perguntar:"Assistente IA", contas:"Contas e bancos",
-  preferencias:"Preferências", ajuda:"Manual do usuário",
+  preferencias:"Preferências", ajuda:"Manual do usuário", exportar:"Exportação",
 };
 
 export { NAV_SECTIONS, sectionOfView, NAV_GROUPS, VIEW_TITLES };

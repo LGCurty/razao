@@ -1,0 +1,30 @@
+/* print.css — relatório do mês (components/tools/MonthReport.jsx). Na tela fica escondido; na impressão
+   ("Salvar como PDF") só ele aparece, em fundo branco, com as cores da logo. */
+.razao-print{display:none}
+@media print{
+  @page{size:A4;margin:14mm 12mm}
+  html,body{background:#fff!important}
+  body>*:not(.razao-print){display:none!important}
+  .razao-print{display:block;color:#1F2328;font-family:Inter,system-ui,sans-serif;font-size:10.5pt;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .razao-print .rp-head{border-bottom:3px solid #D97706;padding-bottom:8pt;margin-bottom:12pt}
+  .razao-print h1{font-family:Sora,Inter,sans-serif;font-size:19pt;margin:0}
+  .razao-print .rp-head p{margin:3pt 0 0;color:#6B7280;font-size:9pt}
+  .razao-print h2{font-size:12pt;margin:16pt 0 6pt;padding-left:7pt;border-left:3px solid #FBBF24}
+  .razao-print .rp-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8pt}
+  .razao-print .rp-kpis div{border:1px solid #E5E7EB;border-radius:6pt;padding:7pt 9pt}
+  .razao-print .rp-kpis small{display:block;font-size:8pt;text-transform:uppercase;letter-spacing:.06em;color:#6B7280}
+  .razao-print .rp-kpis b{display:block;font-size:13pt;margin-top:2pt}
+  .razao-print .rp-nota{font-size:8.5pt;color:#6B7280;margin:6pt 0 0}
+  .razao-print table{width:100%;border-collapse:collapse;font-size:9.5pt}
+  .razao-print th{text-align:left;font-size:8pt;text-transform:uppercase;letter-spacing:.05em;color:#6B7280;border-bottom:1.5px solid #1F2328;padding:4pt 5pt}
+  .razao-print td{border-bottom:1px solid #E5E7EB;padding:4pt 5pt;vertical-align:top}
+  .razao-print .r{text-align:right;white-space:nowrap}
+  .razao-print tr{break-inside:avoid}
+  .razao-print section{break-inside:auto}
+  .razao-print .pos{color:#0F7A4E}
+  .razao-print .neg{color:#B42318}
+  .razao-print .st-over{color:#B42318;font-weight:600}
+  .razao-print .st-warn{color:#B45309;font-weight:600}
+  .razao-print .st-ok{color:#0F7A4E}
+  .razao-print tr.prev td{color:#6B7280;font-style:italic}
+}

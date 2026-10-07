@@ -14,6 +14,8 @@ import { AI_SUMMARY_STYLE, aiModelId, buildMonthlyBriefing, callGemini } from ".
 import { txEffectiveMonth } from "../../utils/calculations";
 import { monthKey } from "../../utils/dates";
 import { brl, brlNum, extractTags, fmtDateBR, formatHours, shortMonthLabel } from "../../utils/formatters";
+import { exportarMovimentos } from "../tools/Export";
+import { podeCompartilhar } from "../../utils/exporters";
 
 function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTotal, alerts, byCatChart, acctName, txs, view, accounts, onSelectMonth, update, isDesktop, onEditMobile, monthIndex, categoryMemory, hourlyWageCents, budgetRows, aiModel, pendingFilter, onConsumePendingFilter, onOpenTx }){
   // Fase 4: busca + filtros combináveis, unificando também os filtros por clique nos gráficos (categoria/tipo).
@@ -25,6 +27,7 @@ function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTo
   const [modo,setModoState]=useState(()=>{ try{ return localStorage.getItem("razao_mov_modo")==="cartoes"?"cartoes":"lista"; }catch(e){ return "lista"; } });
   const setModo=(m)=>{ setModoState(m); try{ localStorage.setItem("razao_mov_modo",m); }catch(e){} };
   const [ordem,setOrdem]=useState("data"); // cartões: "data" (mais recentes) | "valor" (maiores)
+  const [exportOpen,setExportOpen]=useState(false); // exportar exatamente a lista que está na tela
   // filtro chegado de outra aba (ex: clique numa categoria no Panorama) — aplica uma vez e avisa o
   // App pra descartá-lo, senão reabrir o Balanço do zero reaplicaria o mesmo filtro de novo
   useEffect(()=>{
@@ -327,10 +330,11 @@ ${AI_SUMMARY_STYLE}`;
         <div className="listbar">
           <span className="listcount">{listaPlana.length} {listaPlana.length===1?"item":"itens"}</span>
           {modo==="cartoes" &&
-            <div className="seg mini" role="group" aria-label="Ordenar">
+            <div className="seg mini ord" role="group" aria-label="Ordenar">
               <button className={ordem==="data"?"on":""} aria-pressed={ordem==="data"} onClick={()=>setOrdem("data")}>Recentes</button>
               <button className={ordem==="valor"?"on":""} aria-pressed={ordem==="valor"} onClick={()=>setOrdem("valor")}>Maior valor</button>
             </div>}
+          <button className="sbtn iconsbtn exbtn" aria-label="Exportar esta lista" onClick={()=>setExportOpen(true)}><Icon name="baixar" size={16}/></button>
           <div className="seg mini" role="group" aria-label="Visualização">
             <button className={modo==="lista"?"on":""} aria-pressed={modo==="lista"} aria-label="Ver em lista" onClick={()=>setModo("lista")}><Icon name="extrato" size={15}/><span className="segtxt">Lista</span></button>
             <button className={modo==="cartoes"?"on":""} aria-pressed={modo==="cartoes"} aria-label="Ver em cartões" onClick={()=>setModo("cartoes")}><Icon name="grafico" size={15}/><span className="segtxt">Cartões</span></button>
@@ -399,6 +403,15 @@ ${AI_SUMMARY_STYLE}`;
                 : "Toque no botão + para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo."}
               action={{label:"Importar extratos e faturas",icon:"brilho",onClick:()=>goToTab("extrato")}}
               secondary={{label:"Ver no manual",onClick:()=>openHelp("registrar-lancamentos")}}/>)}
+
+      <Sheet open={exportOpen} onClose={()=>setExportOpen(false)} title="Exportar esta lista">
+        <p className="hint" style={{marginTop:0}}>{listaPlana.length} {listaPlana.length===1?"lançamento":"lançamentos"} {hasActiveFilters?"do resultado da busca e dos filtros":`de ${monthLabel}`}, na ordem das datas.</p>
+        <div className="exacts">
+          <button className="sbtn primary" onClick={async()=>{ setExportOpen(false); await exportarMovimentos(listaPlana, accounts, "xlsx", `razao-lancamentos-${new Date().toISOString().slice(0,10)}`, podeCompartilhar()); }}><Icon name="baixar" size={15}/> Excel (.xlsx)</button>
+          <button className="sbtn" onClick={async()=>{ setExportOpen(false); await exportarMovimentos(listaPlana, accounts, "csv", `razao-lancamentos-${new Date().toISOString().slice(0,10)}`, podeCompartilhar()); }}><Icon name="baixar" size={15}/> CSV</button>
+        </div>
+        <p className="hint">Mais opções (período, conta, relatório em PDF) em Ferramentas › Exportação.</p>
+      </Sheet>
 
       {modo==="cartoes" && listaPlana.length>0 &&
         <div className="txgrid">

@@ -24,6 +24,7 @@ import { Extrato } from "./components/movements/ImportStatement";
 import { Balanco } from "./components/movements/MovementList";
 import { TransactionForm } from "./components/movements/NewMovementForm";
 import { MovementSheet, useMovementActions } from "./components/movements/MovementSheet";
+import { Exportacao } from "./components/tools/Export";
 import { setHelpListener, setTabListener } from "./components/navigation/navEvents";
 import { NAV_SECTIONS, VIEW_TITLES, sectionOfView } from "./components/navigation/sections";
 import { GlobalSearch } from "./components/navigation/GlobalSearch";
@@ -632,6 +633,7 @@ function App(){
             {tab==="extrato" && <Extrato {...{accounts,update,txs,aiModel:settings?.aiModel||"rapido",pluggy,categoryMemory,autoSync:pluggySync,revisarAntes:settings?.pluggyReview}}/>}
             {tab==="perguntar" && <Perguntar {...{txs,accounts}}/>}
             {tab==="contas" && <Contas {...{accounts,update,monthTx:monthItens,txs}}/>}
+            {tab==="exportar" && <Exportacao {...{txs,accounts,view,vKey,monthLabel,totals,budgetRows,monthItens,onBackup:()=>exportData()}}/>}
             {tab==="ajuda" && <Ajuda helpTarget={helpTarget} onConsumeTarget={()=>setHelpTarget(null)}/>}
             {tab==="preferencias" &&
               <div className="card prefs">
