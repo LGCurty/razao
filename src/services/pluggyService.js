@@ -46,10 +46,14 @@ async function loadPluggyConnect(){
   return pluggyConnectPromise;
 }
 
+async function tokenDeLogin(){
+  if(!sb) return "";
+  try{ const { data }=await sb.auth.getSession(); return data?.session?.access_token||""; }catch(e){ return ""; }
+}
+
 /* toda conversa com o Pluggy passa pela nossa função serverless, sempre assinada com o token de login */
 async function pluggyApi(action, payload){
-  let token="";
-  if(sb){ try{ const { data }=await sb.auth.getSession(); token=data?.session?.access_token||""; }catch(e){} }
+  const token=await tokenDeLogin();
   let r;
   try{
     r=await fetch("/api/pluggy",{
@@ -57,13 +61,93 @@ async function pluggyApi(action, payload){
       headers:{ "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}) },
       body:JSON.stringify({ action, ...(payload||{}) }),
     });
-  }catch(err){ throw new Error("Sem conexão com o servidor do app. Tente de novo em instantes."); }
+  }catch(err){ const e=new Error("Sem conexão com o servidor do app. Tente de novo em instantes."); e.offline=true; throw e; }
   const data=await r.json().catch(()=>({}));
   // guarda o status HTTP no próprio erro: quem chama decide a mensagem amigável pelo código, não
   // tentando adivinhar pelo texto — o Pluggy responde em inglês ("item not found"), então procurar
   // "404" ou "não encontrad" no texto deixava esse erro específico passar cru para a tela
   if(!r.ok){ const e=new Error(data.error || "Não foi possível falar com o Open Finance agora."); e.status=r.status; throw e; }
   return data;
+}
+
+/* sincronização de uma conexão inteira numa chamada só (api/sync.js: novas tentativas no servidor e
+   status success/partial/error por conta). Devolve null se o endpoint não existir (ex.: `npm run dev`
+   sem `vercel dev`, ou um deploy antigo) — aí quem chama cai no caminho de várias chamadas avulsas. */
+async function pluggySyncApi(payload){
+  const token=await tokenDeLogin();
+  let r;
+  try{
+    r=await fetch("/api/sync",{
+      method:"POST",
+      headers:{ "Content-Type":"application/json", ...(token?{Authorization:"Bearer "+token}:{}) },
+      body:JSON.stringify(payload||{}),
+    });
+  }catch(err){ const e=new Error("Sem conexão com o servidor do app. Tente de novo em instantes."); e.offline=true; throw e; }
+  const data=await r.json().catch(()=>null);
+  if(r.status===404 && !(data && data.status)) return null;
+  if(!r.ok){ const e=new Error((data&&data.error) || "Não foi possível falar com o Open Finance agora."); e.status=r.status; throw e; }
+  return data;
+}
+
+/* abre o Pluggy Connect: sem itemId cria uma conexão nova; com itemId reabre a existente (senha trocada,
+   consentimento vencido, MFA). onSuccess recebe a conexão já no formato guardado em data.pluggy.items. */
+async function abrirPluggyConnect({ itemId, onSuccess, onError }){
+  const [{ accessToken },Widget]=await Promise.all([
+    pluggyApi("connect_token", itemId?{itemId}:{}),
+    loadPluggyConnect(),
+  ]);
+  const widget=new Widget({
+    connectToken: accessToken,
+    includeSandbox: false,
+    onSuccess: (payload)=>{
+      const item=payload?.item||{};
+      if(item.id) onSuccess(conexaoDoItem(item));
+    },
+    onError: (e)=>{ if(onError) onError(e?.message||"O banco recusou a conexão. Tente de novo."); },
+  });
+  widget.init();
+}
+const conexaoDoItem=(item)=>({
+  id:item.id,
+  connectorName:item.connector?.name||"Banco",
+  connectorImage:item.connector?.imageUrl||"",
+  createdAt:new Date().toISOString(),
+  lastSyncAt:"", lastStatus:item.status||"", lastError:"",
+});
+/* lista de conexões com esta incluída: conexão nova entra no fim; reconectada mantém o histórico
+   (criação, última sincronização) e só troca o status e limpa o erro */
+function comConexao(items, nova){
+  const atual=(items||[]).find(i=>i.id===nova.id);
+  if(!atual) return [...(items||[]), nova];
+  return items.map(i=>i.id===nova.id ? {...i, connectorName:nova.connectorName||i.connectorName,
+    connectorImage:nova.connectorImage||i.connectorImage, lastStatus:nova.lastStatus, lastError:""} : i);
+}
+
+/* Sem duplicatas entre o que veio do banco e o que já estava aqui: lançamento novo do Pluggy que bate com
+   um lançamento lançado à mão ou lido de PDF (mesma conta, mesmo valor, mesma data, mesmo tipo, e ainda sem
+   id do banco) não é criado de novo — o existente "adota" o id do banco e fica vinculado. Cada existente
+   adota no máximo um. Devolve a lista final e quantos foram vinculados. */
+function adotarExistentes(existentes, novos){
+  const livres=new Map();
+  existentes.forEach((t,i)=>{
+    if(t.pluggyId || t.type==="transferencia") return;
+    const k=`${t.acctId}|${t.cents}|${t.date}|${t.type}`;
+    if(!livres.has(k)) livres.set(k,[]);
+    livres.get(k).push(i);
+  });
+  const lista=[...existentes];
+  const add=[];
+  let vinculados=0;
+  novos.forEach(n=>{
+    const k=`${n.acctId}|${n.cents}|${n.date}|${n.type}`;
+    const fila=n.pluggyId && n.type!=="transferencia" ? livres.get(k) : null;
+    if(fila && fila.length){
+      const i=fila.shift();
+      lista[i]={...lista[i], pluggyId:n.pluggyId};
+      vinculados++;
+    } else add.push(n);
+  });
+  return { transactions:[...add,...lista], adicionados:add.length, vinculados };
 }
 
 const PLUGGY_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -321,30 +405,42 @@ function diasDesdeUltimaSync(conexao){
    err.reconectar=true, para não ficar tentando de novo à toa. */
 async function syncPluggyConnection({ conexao, accounts, categoryMemory, jaImportados, dias, onEtapa }){
   const etapa=onEtapa||(()=>{});
-  etapa(`Falando com o ${conexao.connectorName}…`,0.06);
-  const info=await pluggyApi("item",{itemId:conexao.id});
-  const status=String(info.status||"").toUpperCase();
-  const st=PLUGGY_ITEM_STATUS[status];
-  if(st && st.reconectar){ const e=new Error(st.label); e.reconectar=true; e.itemStatus=status; throw e; }
-  const aviso = st && !st.ok ? st.label : "";
-
-  etapa("Listando as contas…",0.15);
-  const { results:contas=[] }=await pluggyApi("accounts",{itemId:conexao.id});
-  if(contas.length===0){ const e=new Error("O banco não devolveu nenhuma conta nesta conexão."); e.itemStatus=status; throw e; }
-  // conta/cartão que a conexão traz e ainda não existe aqui é criado na hora (ver garantirContasPluggy)
-  const { accounts:accountsComNovas, novas } = garantirContasPluggy(contas, accounts, conexao.connectorName);
-
   const hoje=new Date();
   const ini=new Date(hoje.getTime()-(dias||diasDesdeUltimaSync(conexao))*86400000);
   const from=new Date(ini.getTime()-ini.getTimezoneOffset()*60000).toISOString().slice(0,10), to=todayISO();
-  const txPorConta={};
-  for(let i=0;i<contas.length;i++){
-    const c=contas[i];
-    etapa(`Buscando os lançamentos de ${c.name||"conta"}…`,0.2+0.75*(i/contas.length));
-    // a paginação por cursor do Pluggy acontece dentro de api/pluggy.js: aqui volta a lista inteira
-    const r=await pluggyApi("transactions",{ accountId:c.id, from, to });
-    txPorConta[c.id]=r.results||[];
+
+  let status, aviso="", contas, txPorConta, erros=[];
+  etapa(`Sincronizando ${conexao.connectorName}…`,0.1);
+  const via=await pluggySyncApi({ itemId:conexao.id, from, to });
+  if(via){
+    status=String(via.itemStatus||"").toUpperCase();
+    if(via.status==="reconectar"){ const e=new Error(via.error||"Reconecte o banco."); e.reconectar=true; e.itemStatus=status||"LOGIN_ERROR"; throw e; }
+    if(via.status==="error"){ const e=new Error(via.error||"Não foi possível buscar os dados do banco."); e.itemStatus=status; throw e; }
+    aviso=via.aviso||"";
+    contas=via.contas||[];
+    txPorConta=via.transacoes||{};
+    erros=via.erros||[];
+  } else {
+    // caminho antigo, em várias chamadas avulsas a api/pluggy.js
+    const info=await pluggyApi("item",{itemId:conexao.id});
+    status=String(info.status||"").toUpperCase();
+    const st=PLUGGY_ITEM_STATUS[status];
+    if(st && st.reconectar){ const e=new Error(st.label); e.reconectar=true; e.itemStatus=status; throw e; }
+    aviso = st && !st.ok ? st.label : "";
+    etapa("Listando as contas…",0.15);
+    ({ results:contas=[] }=await pluggyApi("accounts",{itemId:conexao.id}));
+    if(contas.length===0){ const e=new Error("O banco não devolveu nenhuma conta nesta conexão."); e.itemStatus=status; throw e; }
+    txPorConta={};
+    for(let i=0;i<contas.length;i++){
+      const c=contas[i];
+      etapa(`Buscando os lançamentos de ${c.name||"conta"}…`,0.2+0.75*(i/contas.length));
+      try{ txPorConta[c.id]=(await pluggyApi("transactions",{ accountId:c.id, from, to })).results||[]; }
+      catch(err){ erros.push({ accountId:c.id, nome:c.name||"Conta", error:err.message }); }
+    }
+    if(erros.length===contas.length){ const e=new Error(erros[0].error||"Não foi possível buscar os lançamentos."); e.itemStatus=status; throw e; }
   }
+  // conta/cartão que a conexão traz e ainda não existe aqui é criado na hora (ver garantirContasPluggy)
+  const { accounts:accountsComNovas, novas } = garantirContasPluggy(contas, accounts, conexao.connectorName);
   etapa("Organizando os lançamentos…",0.97);
   const { docs,rows,ignorados }=mapPluggyDocs({
     contas, txPorConta, accounts:accountsComNovas, categoryMemory, jaImportados,
@@ -359,7 +455,10 @@ async function syncPluggyConnection({ conexao, accounts, categoryMemory, jaImpor
     if(m && m.id) contasDaConexao.push(m.id);
     if(m && m.id && pluggyKind(c)==="conta" && typeof c.balance==="number") saldos[m.id]=Math.round(c.balance*100);
   });
-  return { status, aviso, contas, novas, accountsComNovas, docs, rows, ignorados, saldos, contasDaConexao };
+  // sincronização parcial: o que veio é aproveitado, e as contas que falharam são nomeadas no aviso
+  const parcial=erros.length>0;
+  if(parcial) aviso=`Não deu para buscar ${erros.map(x=>x.nome).join(", ")} agora (${erros[0].error}). As outras contas foram atualizadas; nova tentativa em instantes.`;
+  return { status, aviso, parcial, erros, contas, novas, accountsComNovas, docs, rows, ignorados, saldos, contasDaConexao };
 }
 
 /* linha de revisão (mesmo formato da leitura de PDF) → lançamento do app, como a revisão faz ao aprovar.
@@ -373,4 +472,4 @@ function pluggyRowToTx(it){
 }
 const pluggyRowCompleta=(it)=>Boolean(it.acctId && it.cents>0 && (it.type!=="transferencia"||(it.toAcctId&&it.toAcctId!==it.acctId)));
 
-export { PLUGGY_CONNECT_SRCS, pluggyConnectPromise, carregarScript, loadPluggyConnect, pluggyApi, PLUGGY_UUID, PLUGGY_SUBTIPO, PLUGGY_ITEM_STATUS, pluggyKind, pluggyFingerprints, matchPluggyAccount, CONTA_COLORS, nomeContaAutomatica, garantirContasPluggy, PLUGGY_CAT_GASTO, PLUGGY_CAT_GANHO, pluggyCategoria, RE_PAGTO_NO_CARTAO, RE_PAGTO_DE_FATURA, ehPagamentoDeFatura, contrapartePropria, mapPluggyDocs, diasDesdeUltimaSync, syncPluggyConnection, pluggyRowToTx, pluggyRowCompleta };
+export { PLUGGY_CONNECT_SRCS, pluggyConnectPromise, carregarScript, loadPluggyConnect, pluggyApi, pluggySyncApi, abrirPluggyConnect, conexaoDoItem, comConexao, adotarExistentes, PLUGGY_UUID, PLUGGY_SUBTIPO, PLUGGY_ITEM_STATUS, pluggyKind, pluggyFingerprints, matchPluggyAccount, CONTA_COLORS, nomeContaAutomatica, garantirContasPluggy, PLUGGY_CAT_GASTO, PLUGGY_CAT_GANHO, pluggyCategoria, RE_PAGTO_NO_CARTAO, RE_PAGTO_DE_FATURA, ehPagamentoDeFatura, contrapartePropria, mapPluggyDocs, diasDesdeUltimaSync, syncPluggyConnection, pluggyRowToTx, pluggyRowCompleta };

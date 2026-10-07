@@ -32,7 +32,7 @@ src/
     movements/          NewMovementForm, MovementList (Gastos), ImportStatement, OpenFinance
     budget/             Orçamento (tabela, edição, alertas, simulador)
     investments/        Carteira e Metas
-    accounts/           Contas e bancos (inclui o status de sincronização)
+    accounts/           Contas e bancos: Minhas contas (bancos conectados), contas e cartões, parcelamentos
     assistant/  auth/  help/
   services/             supabaseService, dataValidation (migrate), geminiService, pluggyService, pdfService, bcbService…
   hooks/                usePluggyAutoSync, useBudgetAlerts, useIsDesktop
@@ -41,9 +41,30 @@ src/
   styles/               variables.css, theme.css, components.css
   sw.js                 modelo do service worker (o build gera /sw.js com a lista de arquivos e a versão)
 public/vendor/          pdf.js (carregado só quando um PDF precisa ser lido)
-api/                    funções serverless da Vercel
+api/                    funções serverless da Vercel (arquivos com "_" são módulos internos, não rotas)
+  pluggy.js             ações avulsas do Open Finance (abrir conexão, consultar, remover)
+  sync.js               sincroniza uma conexão inteira (ver abaixo)
+  gemini.js             IA · keepalive.js cron diário · monthly-summary.js resumo por e-mail
 supabase/migrations/    SQL das tabelas relacionais
+tests/                  testes das funções de api/ (com fetch simulado)
 ```
+
+## Sincronização com os bancos (Open Finance)
+
+`POST /api/sync { itemId, from?, to? }` busca, no servidor, o status da conexão, as contas e os
+lançamentos de cada conta. Falhas passageiras (rede, 5xx, limite de chamadas) ganham até 3 tentativas
+com espera crescente. A resposta diz `status`:
+
+- `success` — tudo veio;
+- `partial` — algumas contas falharam (`erros` diz quais); o que veio é salvo, a data da última
+  sincronização não avança e o app tenta de novo em 5 minutos;
+- `error` — nada veio; nova tentativa em 5 minutos, até 3 vezes, depois espera a próxima janela;
+- `reconectar` — senha trocada, consentimento vencido ou MFA: o app para de tentar e mostra
+  "Reconectar" em Configurações › Contas e bancos › Minhas contas.
+
+No app, a sincronização roda ao abrir e a cada 6 horas. Não duplica: o id do lançamento no banco é a
+chave, e um lançamento lançado à mão igual ao do banco (mesma conta, valor, data e tipo) é vinculado
+em vez de repetido. Sem internet, espera a conexão voltar.
 
 ## Deploy (Vercel)
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapPluggyDocs, pluggyRowToTx, pluggyRowCompleta, pluggyCategoria, garantirContasPluggy } from "./pluggyService";
+import { mapPluggyDocs, pluggyRowToTx, pluggyRowCompleta, pluggyCategoria, garantirContasPluggy, adotarExistentes, comConexao } from "./pluggyService";
 
 const ACC = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const contaBanco = { id: ACC, type: "BANK", subtype: "CHECKING_ACCOUNT", name: "Conta Corrente", marketingName: "Nubank", number: "0001/12345-6", balance: 1850.25 };
@@ -34,6 +34,31 @@ describe("conversão do Pluggy", () => {
     expect(pluggyRowToTx(it_)).toMatchObject({ source: "pluggy_sync", pluggyId: "p9", description: "X", status: "realizado" });
     expect(pluggyRowCompleta({ ...it_, acctId: "" })).toBe(false);
     expect(pluggyRowCompleta({ ...it_, type: "transferencia", toAcctId: "a1" })).toBe(false);
+  });
+
+  it("sem duplicata: lançamento à mão igual (conta, valor, data, tipo) adota o id do banco", () => {
+    const existentes = [
+      { id: "m1", type: "gasto", cents: 8550, date: "2026-10-01", acctId: "a1", description: "mercado" },
+      { id: "m2", type: "gasto", cents: 8550, date: "2026-10-01", acctId: "a1", pluggyId: "outro" }, // já vinculado
+      { id: "m3", type: "gasto", cents: 999, date: "2026-10-01", acctId: "a2" },
+    ];
+    const novos = [
+      { id: "n1", type: "gasto", cents: 8550, date: "2026-10-01", acctId: "a1", pluggyId: "p1" },
+      { id: "n2", type: "gasto", cents: 8550, date: "2026-10-01", acctId: "a1", pluggyId: "p2" }, // 2ª compra igual no mesmo dia
+      { id: "n3", type: "ganho", cents: 999, date: "2026-10-01", acctId: "a2", pluggyId: "p3" },  // tipo diferente
+    ];
+    const r = adotarExistentes(existentes, novos);
+    expect(r.vinculados).toBe(1);
+    expect(r.adicionados).toBe(2);
+    expect(r.transactions.find((t) => t.id === "m1")).toMatchObject({ pluggyId: "p1", description: "mercado" });
+    expect(r.transactions.map((t) => t.id).sort()).toEqual(["m1", "m2", "m3", "n2", "n3"]);
+  });
+
+  it("reconectar mantém o histórico da conexão e limpa o erro", () => {
+    const items = [{ id: "i1", connectorName: "Itaú", createdAt: "2026-01-01", lastSyncAt: "2026-10-01", lastStatus: "LOGIN_ERROR", lastError: "senha" }];
+    const r = comConexao(items, { id: "i1", connectorName: "Itaú", lastStatus: "UPDATED", lastSyncAt: "" });
+    expect(r[0]).toMatchObject({ createdAt: "2026-01-01", lastSyncAt: "2026-10-01", lastStatus: "UPDATED", lastError: "" });
+    expect(comConexao(items, { id: "i2", connectorName: "Nubank" })).toHaveLength(2);
   });
 
   it("memória de categorização vale mais que o palpite pela categoria do banco", () => {

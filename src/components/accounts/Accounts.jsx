@@ -6,6 +6,7 @@ import { Icon } from "../common/Icon";
 import { Money } from "../common/Input";
 import { Sheet } from "../common/Modal";
 import { HelpIcon } from "../help/HelpIcon";
+import { MyBanks } from "./MyBanks";
 import { parseExtratoText } from "../movements/ImportStatement";
 import { BANKS, bancoDoNome } from "../../domain/banks";
 import { isRealized } from "../../domain/types";
@@ -119,6 +120,7 @@ function Contas({ accounts, update, monthTx, txs }){
   const cardTotal=(id)=>cardInvoiceNet(monthTx, id);
   return (
     <React.Fragment>
+    <MyBanks accounts={accounts} txs={txs}/>
     <div className="card">
       <h3>Contas e cartões <span style={{display:"flex",alignItems:"center",gap:6}}><button className="sbtn" onClick={()=>setForm(blank)}><Icon name="adicionar" size={14}/> Adicionar</button><HelpIcon section="contas-cartoes"/></span></h3>
       <div className="sub">Organize de onde entra e sai cada valor. Cartões mostram a fatura do mês.</div>

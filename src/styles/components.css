@@ -589,3 +589,27 @@
     color:#fff!important;display:grid!important;place-items:center;margin-top:-24px;box-shadow:0 12px 24px -8px var(--accent-bg);
   }
 }
+
+/* ---- Minhas contas (bancos conectados) ---- */
+.rz .mybanks h3 .sbtn{font-weight:500}
+.rz .mbbank{border:1px solid var(--surface-2);border-radius:12px;padding:12px;margin-top:10px}
+.rz .mbbank[data-status="erro"],.rz .mbbank[data-status="reconectar"]{border-color:var(--neg-bg)}
+.rz .mbbank[data-status="parcial"],.rz .mbbank[data-status="offline"]{border-color:var(--warn-bg)}
+.rz .mbhead{display:flex;align-items:center;gap:10px}
+.rz .mblogo{width:34px;height:34px;border-radius:9px;flex:0 0 auto;object-fit:contain;background:var(--surface-2);display:grid;place-items:center;color:var(--accent)}
+.rz .mbinfo{flex:1;min-width:0}
+.rz .mbname{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.rz .mbstatus{font-size:12px;color:var(--text-mut);margin-top:2px;display:flex;align-items:center;gap:6px;line-height:1.4}
+.rz .mbstatus.erro,.rz .mbstatus.reconectar{color:var(--neg)}
+.rz .mbstatus.parcial,.rz .mbstatus.offline{color:var(--warn)}
+.rz .mbsaldo{font-size:15px;font-weight:600;white-space:nowrap}
+.rz .mbcontas{margin:10px 0 0 44px;display:flex;flex-direction:column;gap:4px}
+.rz .mbconta{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-mut)}
+.rz .mbconta .mbcnome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.rz .mbacoes{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 0 44px}
+.rz .mbspin{width:12px;height:12px;border-radius:50%;border:1.5px solid var(--hairline);border-top-color:var(--accent);animation:aispin .8s linear infinite;display:inline-block;flex:0 0 auto}
+@media (max-width:520px){
+  .rz .mbcontas,.rz .mbacoes{margin-left:0}
+  .rz .mbacoes .sbtn{flex:1 1 auto;justify-content:center}
+}
+@media (prefers-reduced-motion:reduce){ .rz .mbspin{animation:none} }

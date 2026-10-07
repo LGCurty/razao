@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { askConfirm, toast } from "../common/Feedback";
 import { Icon } from "../common/Icon";
-import { PLUGGY_ITEM_STATUS, PLUGGY_UUID, diasDesdeUltimaSync, loadPluggyConnect, pluggyApi, syncPluggyConnection } from "../../services/pluggyService";
+import { PLUGGY_ITEM_STATUS, PLUGGY_UUID, abrirPluggyConnect, comConexao, diasDesdeUltimaSync, pluggyApi, syncPluggyConnection } from "../../services/pluggyService";
 import { sb } from "../../services/supabaseService";
 import { fmtDateBR } from "../../utils/formatters";
 
@@ -85,35 +85,18 @@ function OpenFinance({ accounts, update, pluggy, categoryMemory, jaImportados, o
     if(busy) return;
     setErro(""); setBusy("conectando"); setEtapa({label:"Abrindo a conexão segura…",pct:0.3});
     try{
-      const [{ accessToken },Widget]=await Promise.all([
-        pluggyApi("connect_token", itemId?{itemId}:{}),
-        loadPluggyConnect(),
-      ]);
-      if(!vivo.current) return;
-      setBusy(""); setEtapa({label:"",pct:0});
-      const widget=new Widget({
-        connectToken: accessToken,
-        includeSandbox: false,
-        onSuccess: (payload)=>{
-          const item=payload?.item||{};
-          if(!item.id) return;
-          const nova={
-            id:item.id,
-            connectorName:item.connector?.name||"Banco",
-            connectorImage:item.connector?.imageUrl||"",
-            createdAt:new Date().toISOString(),
-            lastSyncAt:"", lastStatus:item.status||"",
-          };
-          update(d=>({pluggy:{...d.pluggy,
-            items:[...d.pluggy.items.filter(i=>i.id!==nova.id),nova]}}));
-          toast(`${nova.connectorName} conectado. Buscando os lançamentos…`,"success");
-          // a busca em si fica por conta do efeito de auto-sincronização (mais abaixo): ele já pega
-          // qualquer conexão sem lastSyncAt — não dá pra também chamar sincronizar() aqui, ou as duas
-          // chamadas disparam quase juntas e uma reconstrói a revisão embaixo dos pés da outra
+      await abrirPluggyConnect({
+        itemId,
+        onSuccess:(nova)=>{
+          update(d=>({pluggy:{...d.pluggy, items:comConexao(d.pluggy.items,nova)}}));
+          toast(`${nova.connectorName} ${itemId?"reconectado":"conectado"}. Buscando os lançamentos…`,"success");
+          // sem revisão, a busca vai pelo mesmo motor da sincronização automática (que não deixa duas
+          // rodarem juntas). Com revisão ligada, a pessoa clica em "Atualizar" quando quiser ver a lista.
+          if(autoSync && !revisar) setTimeout(()=>autoSync.sincronizarAgora(nova.id),800);
         },
-        onError: (e)=>{ if(vivo.current) setErro(e?.message||"O banco recusou a conexão. Tente de novo."); },
+        onError:(msg)=>{ if(vivo.current) setErro(msg); },
       });
-      widget.init();
+      if(vivo.current){ setBusy(""); setEtapa({label:"",pct:0}); }
     }catch(err){
       if(vivo.current){ setErro(err.message||"Não foi possível abrir a conexão."); setBusy(""); setEtapa({label:"",pct:0}); }
     }

@@ -1,7 +1,7 @@
 /* hooks/usePluggyAutoSync.js — hook da sincronização automática do Open Finance (ao abrir e a cada 6h, com novas tentativas). */
 import React, { useEffect, useRef, useState } from "react";
 import { toast } from "../components/common/Feedback";
-import { PLUGGY_ITEM_STATUS, pluggyApi, pluggyRowCompleta, pluggyRowToTx, syncPluggyConnection } from "../services/pluggyService";
+import { PLUGGY_ITEM_STATUS, adotarExistentes, pluggyApi, pluggyRowCompleta, pluggyRowToTx, syncPluggyConnection } from "../services/pluggyService";
 import { sb } from "../services/supabaseService";
 
 /* ---- sincronização automática do Open Finance (Pluggy) ----
@@ -10,7 +10,10 @@ import { sb } from "../services/supabaseService";
    tentativa depois de 5 minutos, no máximo 3 seguidas — depois disso espera a próxima janela de 6h
    (ou um clique em "tentar de novo"). Conexão que exige ação da pessoa (senha trocada, consentimento
    vencido) não é tentada de novo sozinha: aparece como "reconectar". Sem internet, espera o "online".
-   O que chega é gravado direto, sem duplicar (o id do lançamento no Pluggy é a chave). Lançamento ainda
+   Sincronização parcial (algumas contas falharam no servidor) salva o que veio e conta como falha
+   para a nova tentativa, sem avançar a data da última sincronização.
+   O que chega é gravado direto, sem duplicar (o id do lançamento no Pluggy é a chave; lançamento igual
+   já lançado à mão é vinculado em vez de repetido — ver adotarExistentes). Lançamento ainda
    PENDENTE no banco fica para depois: pode mudar de valor ou sumir antes de ser efetivado.
    Com o app fechado nada roda — isso exigiria um agendamento no servidor com chave privilegiada. */
 const AUTO_SYNC_HORAS=6;
@@ -20,7 +23,7 @@ function usePluggyAutoSync({ ativo, data, update }){
   const dataRef=useRef(data); dataRef.current=data;
   const updateRef=useRef(update); updateRef.current=update;
   const [configurado,setConfigurado]=useState(null);
-  const [estado,setEstado]=useState({});   // itemId -> { fase:"sincronizando"|"ok"|"erro"|"reconectar", erro, em, novos }
+  const [estado,setEstado]=useState({});   // itemId -> { fase:"sincronizando"|"ok"|"parcial"|"erro"|"offline"|"reconectar", erro, em, novos }
   const [rodando,setRodando]=useState(false);
   const rodandoRef=useRef(false);
   const falhas=useRef({});                 // itemId -> { n, em } (falhas seguidas e quando foi a última)
@@ -40,13 +43,20 @@ function usePluggyAutoSync({ ativo, data, update }){
     try{
       const r=await syncPluggyConnection({ conexao, accounts:d.accounts, categoryMemory:d.categoryMemory, jaImportados, dias:opts&&opts.dias });
       const prontos=r.rows.filter(it=>pluggyRowCompleta(it) && !it.pendente).map(pluggyRowToTx);
-      // quantos realmente entram (a gravação abaixo ainda filtra pelo estado mais recente)
-      const conhecidosAgora=new Set((dataRef.current.transactions||[]).filter(t=>t.pluggyId).map(t=>t.pluggyId));
-      const gravados=prontos.filter(t=>!t.pluggyId||!conhecidosAgora.has(t.pluggyId)).length;
+      const naoConhecidos=(lista)=>{
+        const conhecidos=new Set(lista.filter(t=>t.pluggyId).map(t=>t.pluggyId));
+        return prontos.filter(t=>!t.pluggyId||!conhecidos.has(t.pluggyId));
+      };
+      // quantos realmente entram e quantos só se vinculam a um lançamento já existente (a gravação
+      // abaixo refaz a conta sobre o estado mais recente)
+      const previa=adotarExistentes(dataRef.current.transactions||[], naoConhecidos(dataRef.current.transactions||[]));
+      const gravados=previa.adicionados, vinculados=previa.vinculados;
+      const parcial=Boolean(r.parcial);
+      const f0=falhas.current[conexao.id]||{n:0,em:0};
+      const ultimaTentativa=parcial && f0.n+1>=AUTO_SYNC_MAX_TENTATIVAS;
       const agora=new Date().toISOString();
       updateRef.current(dd=>{
-        const conhecidos=new Set(dd.transactions.filter(t=>t.pluggyId).map(t=>t.pluggyId));
-        const add=prontos.filter(t=>!t.pluggyId||!conhecidos.has(t.pluggyId));
+        const { transactions }=adotarExistentes(dd.transactions, naoConhecidos(dd.transactions));
         const contasNovas=r.novas.filter(a=>!dd.accounts.some(x=>x.id===a.id));
         const daConexao=new Set(r.contasDaConexao||[]);
         const accounts=[...dd.accounts,...contasNovas].map(a=>{
@@ -56,26 +66,32 @@ function usePluggyAutoSync({ ativo, data, update }){
           return n;
         });
         return {
-          transactions:[...add,...dd.transactions],
+          transactions,
           accounts,
+          // parcial: a data da última sincronização NÃO avança, para a próxima tentativa buscar de novo a
+          // mesma janela das contas que falharam (o id do banco impede duplicar as que já vieram)
           pluggy:{...dd.pluggy, items:dd.pluggy.items.map(i=>i.id===conexao.id
-            ? {...i,lastSyncAt:agora,lastStatus:r.status,contas:r.contas.length,lastError:""} : i)},
+            ? {...i,...(parcial?{}:{lastSyncAt:agora}),lastStatus:r.status,contas:r.contas.length,lastError:ultimaTentativa?r.aviso:""} : i)},
         };
       });
-      falhas.current[conexao.id]={n:0,em:0};
-      setEstado(s=>({...s,[conexao.id]:{fase:"ok",erro:r.aviso||"",em:Date.now(),novos:gravados}}));
-      return { ok:true, novos:gravados, contasNovas:r.novas };
+      falhas.current[conexao.id]=parcial ? {n:f0.n+1,em:Date.now()} : {n:0,em:0};
+      setEstado(s=>({...s,[conexao.id]:{fase:parcial?"parcial":"ok",erro:r.aviso||"",em:Date.now(),novos:gravados,vinculados,tentativas:parcial?f0.n+1:0}}));
+      return { ok:true, novos:gravados, vinculados, parcial, aviso:r.aviso, contasNovas:r.novas };
     }catch(err){
       const f=falhas.current[conexao.id]||{n:0,em:0};
-      falhas.current[conexao.id]={n:f.n+1,em:Date.now()};
+      // sem internet não conta como tentativa: o evento "online" dispara a sincronização de novo
+      const offline=Boolean(err.offline) || (typeof navigator!=="undefined" && navigator.onLine===false);
+      if(!offline) falhas.current[conexao.id]={n:f.n+1,em:Date.now()};
       const reconectar=Boolean(err.reconectar);
       // só grava na conexão (e portanto no banco de dados) o que pede ação: reconectar, ou a última tentativa
-      if(reconectar || f.n+1>=AUTO_SYNC_MAX_TENTATIVAS){
+      if(reconectar || (!offline && f.n+1>=AUTO_SYNC_MAX_TENTATIVAS)){
         updateRef.current(dd=>({pluggy:{...dd.pluggy,items:dd.pluggy.items.map(i=>i.id===conexao.id
           ? {...i,lastStatus:err.itemStatus||i.lastStatus,lastError:err.message||"Falha ao sincronizar."} : i)}}));
       }
-      setEstado(s=>({...s,[conexao.id]:{fase:reconectar?"reconectar":"erro",erro:err.message||"Não foi possível buscar os dados do banco.",em:Date.now(),tentativas:f.n+1}}));
-      return { ok:false, erro:err.message, reconectar };
+      const fase=reconectar?"reconectar":offline?"offline":"erro";
+      const erro=offline ? "Sem internet — a sincronização roda assim que a conexão voltar." : (err.message||"Não foi possível buscar os dados do banco.");
+      setEstado(s=>({...s,[conexao.id]:{fase,erro,em:Date.now(),tentativas:offline?f.n:f.n+1}}));
+      return { ok:false, erro, reconectar, offline };
     }
   }
 
@@ -86,17 +102,23 @@ function usePluggyAutoSync({ ativo, data, update }){
       return { ok:false, erro:"Sem conexão com a internet." };
     }
     rodandoRef.current=true; setRodando(true);
-    let novos=0; const erros=[], contas=[];
+    let novos=0, vinculados=0; const erros=[], avisos=[], contas=[];
     try{
       for(const c of lista){
         const r=await sincronizarUma(c, opts);
-        if(r.ok){ novos+=r.novos; contas.push(...(r.contasNovas||[])); } else erros.push(`${c.connectorName}: ${r.erro}`);
+        if(r.ok){
+          novos+=r.novos; vinculados+=r.vinculados||0; contas.push(...(r.contasNovas||[]));
+          if(r.parcial) avisos.push(`${c.connectorName}: ${r.aviso}`);
+        } else erros.push(`${c.connectorName}: ${r.erro}`);
       }
     }finally{ rodandoRef.current=false; setRodando(false); }
     if(contas.length) toast(`${contas.length===1?"Conta criada":"Contas criadas"} automaticamente: ${contas.map(a=>a.name).join(", ")}.`,"success");
-    if(novos>0) toast(`${novos} lançamento${novos===1?" novo":"s novos"} do banco ${novos===1?"salvo":"salvos"}.`,"success");
-    else if(manual && erros.length===0) toast("Tudo em dia: nenhum lançamento novo nos bancos.","default");
-    return erros.length ? { ok:false, erro:erros.join(" · "), novos } : { ok:true, novos };
+    const jaTinha = vinculados>0 ? ` ${vinculados} já ${vinculados===1?"estava lançado":"estavam lançados"} à mão e ${vinculados===1?"foi vinculado":"foram vinculados"} ao banco, sem duplicar.` : "";
+    if(novos>0) toast(`${novos} lançamento${novos===1?" novo":"s novos"} do banco ${novos===1?"salvo":"salvos"}.${jaTinha}`,"success");
+    else if(vinculados>0) toast(jaTinha.trim(),"default");
+    else if(manual && erros.length===0 && avisos.length===0) toast("Tudo em dia: nenhum lançamento novo nos bancos.","default");
+    if(manual && avisos.length) toast(avisos.join(" · "),"error");
+    return erros.length ? { ok:false, erro:erros.join(" · "), novos } : { ok:true, novos, parcial:avisos.length>0 };
   }
 
   // conexões "vencidas" (6h+ sem atualizar) e liberadas para tentar agora, respeitando a espera entre tentativas
@@ -105,9 +127,11 @@ function usePluggyAutoSync({ ativo, data, update }){
     return (dataRef.current.pluggy?.items||[]).filter(c=>{
       const st=PLUGGY_ITEM_STATUS[String(c.lastStatus||"").toUpperCase()];
       if(st && st.reconectar) return false; // espera a pessoa reconectar
+      const f=falhas.current[c.id];
+      // falha recente (inclusive sincronização parcial) ganha nova tentativa mesmo fora da janela de 6h
+      if(f && f.n>0 && f.n<AUTO_SYNC_MAX_TENTATIVAS) return agora-f.em>=AUTO_SYNC_RETRY_MIN*60000;
       const velha=!c.lastSyncAt || (agora-new Date(c.lastSyncAt).getTime())>=AUTO_SYNC_HORAS*3600000;
       if(!velha) return false;
-      const f=falhas.current[c.id];
       if(!f || f.n===0) return true;
       if(f.n<AUTO_SYNC_MAX_TENTATIVAS) return agora-f.em>=AUTO_SYNC_RETRY_MIN*60000;
       return agora-f.em>=AUTO_SYNC_HORAS*3600000;
@@ -132,7 +156,10 @@ function usePluggyAutoSync({ ativo, data, update }){
     configurado, ativo:Boolean(ativo && configurado), rodando, estado, ultimaSync,
     // manual: zera as falhas e roda já (uma conexão, ou todas)
     sincronizarAgora:(itemId, opts)=>{
-      const lista=items.filter(i=>!itemId || i.id===itemId);
+      // lê o estado mais recente (não o deste render): quem acabou de conectar um banco chama isto logo
+      // depois de gravar a conexão nova
+      const atuais=(dataRef.current && dataRef.current.pluggy && dataRef.current.pluggy.items)||[];
+      const lista=atuais.filter(i=>!itemId || i.id===itemId);
       lista.forEach(i=>{ falhas.current[i.id]={n:0,em:0}; });
       if(!ativo) return Promise.resolve({ ok:false, erro: !sb ? "Entre com a sua conta para sincronizar com o banco." : "Sincronização indisponível agora." });
       if(configurado===false) return Promise.resolve({ ok:false, erro:"Open Finance ainda não configurado no servidor." });

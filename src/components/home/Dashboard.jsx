@@ -26,7 +26,7 @@ function HomeDashboard({ txs, accounts, monthIndex, vKey, monthLabel, totals, bu
     .filter(x=>x.v>0);
   const conexoes=(pluggy&&pluggy.items)||[];
   const estado=(pluggySync&&pluggySync.estado)||{};
-  const comErro=conexoes.filter(c=>{ const e=estado[c.id]; return (e && (e.fase==="erro"||e.fase==="reconectar")) || c.lastError; });
+  const comErro=conexoes.filter(c=>{ const e=estado[c.id]; return (e && (e.fase==="erro"||e.fase==="reconectar"||e.fase==="parcial")) || c.lastError; });
   const ultima=pluggySync&&pluggySync.ultimaSync;
   const nome = session ? String(session.user.email||"").split("@")[0] : "";
 
@@ -57,7 +57,7 @@ function HomeDashboard({ txs, accounts, monthIndex, vKey, monthLabel, totals, bu
               <Icon name="sincronizar" size={16}/>
               <span>{pluggySync.rodando ? "Sincronizando…" : comErro.length ? "Erro na sincronização" : ultima ? `Atualizado ${tempoDesde(ultima)}` : "Sincronizar"}</span>
             </button>
-          : <button className="syncbtn" onClick={()=>goToTab("extrato")}><Icon name="banco" size={16}/><span>Conectar banco</span></button>}
+          : <button className="syncbtn" onClick={()=>goToTab("contas")}><Icon name="banco" size={16}/><span>Conectar banco</span></button>}
       </div>
 
       <div className="card g-6 homecard">
