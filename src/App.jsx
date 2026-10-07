@@ -624,7 +624,7 @@ function App(){
             {tab==="geral" && <HomeDashboard {...{txs,accounts,monthIndex,vKey,monthLabel,totals,budgetRows,pluggy,onOpenTx:abrirFicha}}/>}
             {tab==="geral" &&
               <button className="sbtn panolink" onClick={()=>setTab("panorama")}><Icon name="grafico" size={15}/> Ver o panorama completo <Icon name="seta-direita" size={14}/></button>}
-            {tab==="panorama" && <Geral {...{txs,accounts,holdings,view,onSelectMonth:selectMonth,monthIndex,update,patrimonyHistory,recaps,aiModel:settings?.aiModel||"rapido"}}/>}
+            {tab==="panorama" && <Geral {...{txs,accounts,holdings,view,onSelectMonth:selectMonth,monthIndex,update,patrimonyHistory,recaps,aiModel:settings?.aiModel||"rapido",onOpenTx:abrirFicha}}/>}
             {tab==="balanco" && <Balanco {...{grouped,monthLabel,totals,prevTotals,sparkline,plannedTotal,alerts,byCatChart,acctName,txs,view,accounts,onSelectMonth:selectMonth,update,isDesktop,onEditMobile:openEditMobile,monthIndex,categoryMemory,hourlyWageCents:settings?.hourlyWageCents||0,budgetRows,aiModel:settings?.aiModel||"rapido",pendingFilter,onConsumePendingFilter:()=>setPendingFilter(null),onOpenTx:abrirFicha}}/>}
             {tab==="orcamento" && <Orcamento {...{onOpenTx:abrirFicha,budgetFiltro,onBudgetFiltro:setBudgetFiltro,budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts,budgetNotify:Boolean(settings?.budgetNotify)}}/>}
             {tab==="metas" && <Metas {...{goals,update,txs}}/>}

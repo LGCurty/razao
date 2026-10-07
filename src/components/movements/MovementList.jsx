@@ -29,7 +29,8 @@ function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTo
   // App pra descartá-lo, senão reabrir o Balanço do zero reaplicaria o mesmo filtro de novo
   useEffect(()=>{
     if(!pendingFilter) return;
-    if(pendingFilter.category) setFilters(f=>({...f,categories:[pendingFilter.category]}));
+    if(pendingFilter.filters) setFilters({accounts:[],types:[],categories:[],tags:[],dateFrom:"",dateTo:"",status:"",valueMin:"",valueMax:"",...pendingFilter.filters});
+    else if(pendingFilter.category) setFilters(f=>({...f,categories:[pendingFilter.category]}));
     else if(pendingFilter.tag) setFilters(f=>({...f,tags:[pendingFilter.tag]}));
     onConsumePendingFilter && onConsumePendingFilter();
   },[pendingFilter]);

@@ -7,6 +7,7 @@ import { Icon } from "../common/Icon";
 import { RichAI } from "../common/RichAI";
 import { HelpIcon } from "../help/HelpIcon";
 import { goToTab, openHelp } from "../navigation/navEvents";
+import { InteractiveAnalytics } from "./Analytics";
 import { CAT_COLOR, QUALITATIVE } from "../../domain/categories";
 import { TYPES, isRealized } from "../../domain/types";
 import { fetchBcbIndicators } from "../../services/bcbService";
@@ -38,7 +39,7 @@ function BcbIndicators(){
 }
 
 /* ---------- PANORAMA GERAL (consolidado de todos os meses e todas as contas) ---------- */
-function Geral({ txs, accounts, holdings, view, onSelectMonth, monthIndex, update, patrimonyHistory, recaps, aiModel }){
+function Geral({ txs, accounts, holdings, view, onSelectMonth, monthIndex, update, patrimonyHistory, recaps, aiModel, onOpenTx }){
   const EMPTY_BUCKET={entradas:0,saidas:0,investido:0,proventos:0,porCategoria:{},itens:[]};
   const monthBucket=(mk)=>monthIndex[mk]||EMPTY_BUCKET;
   // totais de todos os tempos: soma os baldes do índice em vez de re-varrer txs inteiro
@@ -264,6 +265,8 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
           <div className="stat"><div className="k"><Icon name="investimentos" size={12}/>Investido</div><div className="v" style={{color:"var(--inv)"}}>{brl(totals.inv)}</div></div>
         </div>
       </div>
+
+      <InteractiveAnalytics txs={txs} accounts={accounts} onOpenTx={onOpenTx}/>
 
       {(latestWeeklyRecap||latestMonthlyRecap) &&
         <div className="card g-12">

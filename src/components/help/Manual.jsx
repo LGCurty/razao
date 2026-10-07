@@ -438,6 +438,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
             steps={[
               "Menu ☰ (no topo, no celular): todas as telas em grupos, com contadores — lançamentos do mês e orçamentos dentro do limite, em atenção e estourados. Tocar em \"Atenção\" ou \"Estourados\" já abre o orçamento filtrado.",
               "Lupa (busca): acha qualquer movimento de qualquer mês por descrição, categoria, conta, #tag ou valor (\"85\" acha de R$ 85,00 a R$ 85,99; \"85,50\" acha o valor exato). Tocar no resultado abre o movimento.",
+              "Análise interativa (topo do Panorama): escolha Gastos ou Renda e o período (3, 6, 12 meses ou tudo). Toque numa barra de categoria, conta ou mês para filtrar os outros gráficos; os filtros aparecem em \"Filtros ativos\" e saem no ×. \"Ver os N lançamentos\" abre a lista com os mesmos filtros.",
               "Saldo por conta soma tudo desde o início; Patrimônio estimado soma contas (sem cartão) + carteira de investimentos.",
               "Histórico de patrimônio guarda um retrato automático do total ao fim de cada mês, num gráfico.",
               "Contas a pagar e lembretes lista o que está previsto pra vencer nos próximos 7 dias, ou já atrasado.",
