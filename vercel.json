@@ -1,4 +1,8 @@
 {
+  "framework": "vite",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "crons": [
     { "path": "/api/keepalive", "schedule": "0 3 * * *" }
   ]

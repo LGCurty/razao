@@ -1,0 +1,32 @@
+/* variables.css: tokens de cor, raio e sombra (claro em .rz, escuro em .rz.dark) — extraído do <style> do index.html de arquivo único. */
+/* ===================== tokens ===================== */
+.rz{
+  --bg:#F6F7F9;--surface:#FFFFFF;--surface-2:#F1F3F7;--hairline:#E4E7EE;
+  --text:#0F1218;--text-mut:#5C6577;
+  --accent:#3E5266;--accent-deep:#26323F;
+  --pos:#12805F;--neg:#C2382F;--inv:#3B63C4;--warn:#B87C10;--trf:#2E93A3;
+  --pos-bg:color-mix(in srgb, var(--pos) 10%, transparent);
+  --neg-bg:color-mix(in srgb, var(--neg) 10%, transparent);
+  --inv-bg:color-mix(in srgb, var(--inv) 10%, transparent);
+  --warn-bg:color-mix(in srgb, var(--warn) 10%, transparent);
+  --trf-bg:color-mix(in srgb, var(--trf) 10%, transparent);
+  --accent-bg:color-mix(in srgb, var(--accent) 10%, transparent);
+  --grad-accent:linear-gradient(120deg,var(--accent),var(--accent-deep));
+  --r-field:10px;--r-card:16px;--r-sheet:20px;--r-pill:999px;
+  --shadow-card:0 1px 2px rgba(15,18,24,.04),0 10px 24px -16px rgba(15,18,24,.14);
+  font-family:'Inter',system-ui,sans-serif;color:var(--text);background:var(--bg);
+  min-height:100vh;width:100%;-webkit-font-smoothing:antialiased;
+}
+.rz.dark{
+  --bg:#08090D;--surface:#0F1117;--surface-2:#151821;--hairline:#1E222C;
+  --text:#EDEFF4;--text-mut:#98A0B3;
+  --accent:#5C7690;--accent-deep:#3E5266;
+  --pos:#2FB98A;--neg:#E2564D;--inv:#5A8DEE;--warn:#E8B23C;--trf:#46B7C7;
+  --pos-bg:color-mix(in srgb, var(--pos) 8%, transparent);
+  --neg-bg:color-mix(in srgb, var(--neg) 8%, transparent);
+  --inv-bg:color-mix(in srgb, var(--inv) 8%, transparent);
+  --warn-bg:color-mix(in srgb, var(--warn) 8%, transparent);
+  --trf-bg:color-mix(in srgb, var(--trf) 8%, transparent);
+  --accent-bg:color-mix(in srgb, var(--accent) 8%, transparent);
+  --shadow-card:0 12px 32px -20px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.04);
+}
