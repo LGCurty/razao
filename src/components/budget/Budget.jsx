@@ -14,7 +14,7 @@ import { monthKey } from "../../utils/dates";
 import { brl, capFirst } from "../../utils/formatters";
 
 /* ---------- ORÇAMENTO ---------- */
-function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal, totalSpent, monthLabel, txs, view, accounts, budgetNotify }){
+function Orcamento({ budgetFiltro, onBudgetFiltro, budgetRows, budgets, budgetExceptions, update, plannedTotal, totalSpent, monthLabel, txs, view, accounts, budgetNotify }){
   const allCats=CATS.gasto.map(c=>c[0]);
   const vKey=`${view.getFullYear()}-${String(view.getMonth()+1).padStart(2,"0")}`;
 
@@ -30,6 +30,8 @@ function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal
   };
   // "Editar orçamentos": todas as categorias de uma vez, valendo para todos os meses (padrão) ou só para o mês aberto
   const [editando,setEditando]=useState(false);
+  // filtro escolhido no menu lateral ou nos botões acima da tabela
+  const linhasVisiveis = budgetFiltro ? budgetRows.filter(r=>r.status===budgetFiltro) : budgetRows;
   const [escopo,setEscopo]=useState("default");
   const [rascunho,setRascunho]=useState({});
   const valoresDo=(esc)=>Object.fromEntries(allCats.map(c=>[c, esc==="month" ? ((budgetExceptions[vKey]||{})[c] ?? (budgets[c]||0)) : (budgets[c]||0)]));
@@ -173,11 +175,18 @@ function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal
           : <React.Fragment>
               {budgetRows.length===0 && <p className="hint">Nenhuma categoria com orçamento ou gasto ainda. Toque em "Editar orçamentos" para definir os limites — o histórico de quanto você costuma gastar aparece aqui assim que houver lançamentos.</p>}
               {budgetRows.length>0 &&
+                <div className="fchips" role="group" aria-label="Filtrar por status">
+                  {[[null,"Todos",budgetRows.length],["ok","Dentro do limite",budgetRows.filter(r=>r.status==="ok").length],["warn","Atenção",budgetRows.filter(r=>r.status==="warn").length],["over","Estourados",budgetRows.filter(r=>r.status==="over").length]].map(([k,l,n])=>
+                    <button key={l} className={"fchip"+(k?" "+k:"")+((budgetFiltro||null)===k?" on":"")} aria-pressed={(budgetFiltro||null)===k} onClick={()=>onBudgetFiltro && onBudgetFiltro(k)}>{l} <span>{n}</span></button>)}
+                </div>}
+              {budgetRows.length>0 && linhasVisiveis.length===0 &&
+                <p className="hint">Nenhuma categoria com esse status em {monthLabel}.</p>}
+              {linhasVisiveis.length>0 &&
                 <div className="budtable" role="table" aria-label={`Orçamento de ${monthLabel}`}>
                   <div className="budtr budth" role="row">
                     <span role="columnheader">Categoria</span><span role="columnheader">Orçado</span><span role="columnheader">Gasto</span><span role="columnheader">%</span><span role="columnheader">Status</span>
                   </div>
-                  {budgetRows.map(r=>{
+                  {linhasVisiveis.map(r=>{
                     const rollover=r.limit>0?r.limit-(prevSpentByCat[r.cat]||0):0;
                     return (
                       <div className="budtrwrap" key={r.cat} role="rowgroup">

@@ -1,7 +1,8 @@
 /* components/auth/Auth.jsx — entrar, criar conta, recuperar senha e definir senha nova. */
 import React, { useState } from "react";
 import { toast } from "../common/Feedback";
-import { BrandMark, Icon } from "../common/Icon";
+import { Icon } from "../common/Icon";
+import { Logo } from "../common/Logo";
 import { sb } from "../../services/supabaseService";
 
 /* =========================== TELA DE LOGIN =========================== */
@@ -44,8 +45,7 @@ function Auth(){
     <div className="rz dark">
       <div className="authshell">
         <div className="authbrand">
-          <div className="mark"><BrandMark size={40}/></div>
-          <h1>Razão</h1>
+          <h1 className="mark"><Logo variant="vertical" height={112}/></h1>
           <p>Clareza total sobre para onde vai cada real.</p>
           <ul className="authbadges">
             <li><Icon name="escudo" size={16}/> Dados protegidos pelo Supabase</li>
@@ -130,8 +130,7 @@ function RecoverySetPassword({ onDone }){
     <div className="rz dark">
       <div className="authshell">
         <div className="authbrand">
-          <div className="mark"><BrandMark size={40}/></div>
-          <h1>Razão</h1>
+          <h1 className="mark"><Logo variant="vertical" height={112}/></h1>
           <p>Vamos definir sua nova senha.</p>
         </div>
         <div className="authform">

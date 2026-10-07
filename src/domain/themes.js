@@ -1,10 +1,13 @@
 /* domain/themes.js — cores de acento escolhíveis em Preferências. */
 /* paleta de acentos escolhíveis (Configurações > Personalização). Cada tema já vem com o par
    claro/escuro validado (contraste mínimo garantido contra texto branco em botão sólido e contra
-   o fundo do próprio tema) — nenhuma combinação aqui deixa um botão com texto ilegível. "aco" é o
+   o fundo do próprio tema) — nenhuma combinação aqui deixa um botão com texto ilegível. "razao" é o
    padrão de fábrica. As cores de status (ganho/gasto/investimento/aviso) e a paleta das categorias
    nos gráficos (QUALITATIVE) nunca mudam com a escolha aqui — só o acento de marca muda. */
 const COLOR_THEMES = [
+  // padrão desde a logo nova: âmbar da logo. No escuro o âmbar é claro demais para texto branco, então o
+  // texto sobre o acento ("on") é o grafite da logo; os outros temas usam branco (padrão do CSS)
+  { id:"razao", name:"Razão (âmbar)", light:{accent:"#B45309",deep:"#92400E",on:"#FFFFFF"}, dark:{accent:"#FBBF24",deep:"#D97706",on:"#1F2328"} },
   { id:"aco", name:"Aço", light:{accent:"#3E5266",deep:"#26323F"}, dark:{accent:"#5C7690",deep:"#3E5266"} },
   { id:"grafite", name:"Grafite", light:{accent:"#4A4744",deep:"#2E2C2A"}, dark:{accent:"#857E77",deep:"#6B6762"} },
   { id:"indigo", name:"Índigo", light:{accent:"#4338CA",deep:"#2D2A85"}, dark:{accent:"#7B77E0",deep:"#4F49C4"} },

@@ -6,6 +6,11 @@ import React from "react";
    Substituem todo emoji da interface, inclusive nas categorias.
    ======================================================================= */
 const ICONS = {
+  casa: <React.Fragment><path d="M4 11 L12 4 L20 11"/><path d="M6 9.5 V20 H18 V9.5"/><path d="M10 20 V14 H14 V20"/></React.Fragment>,
+  grafico: <React.Fragment><line x1="4" y1="20" x2="20" y2="20"/><rect x="6" y="12" width="3" height="6" rx="1"/><rect x="11" y="8" width="3" height="10" rx="1"/><rect x="16" y="4" width="3" height="14" rx="1"/></React.Fragment>,
+  menu: <React.Fragment><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></React.Fragment>,
+  "x-circulo": <React.Fragment><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></React.Fragment>,
+  livro: <React.Fragment><path d="M4 5.5 C4 4.7 4.7 4 5.5 4 H11 V20 H5.5 C4.7 20 4 19.3 4 18.5 Z"/><path d="M20 5.5 C20 4.7 19.3 4 18.5 4 H13 V20 H18.5 C19.3 20 20 19.3 20 18.5 Z"/></React.Fragment>,
   panorama: <React.Fragment><circle cx="12" cy="12" r="9"/><path d="M14 10 L12 12 L10 14 L12 12 Z"/></React.Fragment>,
   calendario: <React.Fragment><rect x="3" y="5" width="18" height="16" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="3" x2="8" y2="7"/><line x1="16" y1="3" x2="16" y2="7"/></React.Fragment>,
   orcamento: <React.Fragment><circle cx="12" cy="12" r="9"/><path d="M12 12 L12 3 A9 9 0 0 1 19.5 16.5 Z"/></React.Fragment>,

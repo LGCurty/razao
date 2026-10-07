@@ -8,9 +8,9 @@ const TOUR_STEPS=[
   { title:"Bem-vindo ao Razão", text:"Um jeito rápido de registrar e entender seu dinheiro, sem planilha. Vamos ver o essencial em poucos passos." },
   { title:"O caminho mais rápido: importar do banco", text:"Baixe os PDFs do mês no site do seu banco e do seu cartão e jogue todos de uma vez em \"Importar do banco\". A IA descobre de qual banco é cada arquivo, separa gasto, entrada, pagamento de fatura e transferência entre bancos — você só confere e importa." },
   { title:"Ou registre na mão, quando preferir", text:"Gastos, ganhos, investimentos e transferências — use o botão de adicionar (o + central no celular, ou o botão \"Novo movimento\" no canto da tela, no computador)." },
-  { title:"Acompanhe pela Home e por Gastos", text:"A Home mostra o resumo e o histórico completo desde o início; Gastos mostra mês a mês, com gráficos, busca e filtros." },
+  { title:"Acompanhe pela Home e pelo menu ☰", text:"A Home mostra o resumo do mês e o Panorama, o histórico completo desde o início. O botão ☰ no topo abre o menu completo, com contadores (lançamentos do mês, orçamentos em atenção ou estourados), e a lupa busca qualquer movimento por descrição, categoria, conta ou valor." },
   { title:"Nomeie suas contas com o banco de verdade", text:"Em Contas, troque \"Conta principal\" pelo nome real (Nubank, Itaú, Inter). É por esse nome que a importação reconhece sozinha de quem é cada PDF. Aproveite e configure fechamento e vencimento dos cartões: assim um gasto no cartão conta na fatura do mês certo, não no mês da compra." },
-  { title:"Precisa de ajuda?", text:"A Ajuda (em Configurações) tem um manual completo com exemplos ao vivo, e o ícone \"?\" nos cartões principais leva direto pra seção certa." },
+  { title:"Precisa de ajuda?", text:"O Manual do usuário (menu ☰ › Ferramentas) tem um guia completo com exemplos ao vivo, e o ícone \"?\" nos cartões principais leva direto pra seção certa." },
 ];
 function WelcomeTour(){
   const [open,setOpen]=useState(false);

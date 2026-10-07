@@ -1,6 +1,7 @@
 /* components/common/Loading.jsx — telas de carregamento, de erro de carregamento e o diálogo de conflito entre aparelhos. */
 import React from "react";
-import { BrandMark, Icon } from "./Icon";
+import { Icon } from "./Icon";
+import { Logo } from "./Logo";
 import { Sheet } from "./Modal";
 
 /* ---- skeletons / estado vazio ---- */
@@ -11,7 +12,7 @@ function SkeletonScreen(){
   return (
     <div className="rz dark">
       <div className="topbar"><div className="topbar-in">
-        <div className="brandmark"><BrandMark/><div className="brandtext"><Skeleton w={64} h={16}/></div></div>
+        <div className="brandmark"><Logo variant="horizontal" height={36}/></div>
         <Skeleton w={140} h={34} r={999} style={{margin:"0 auto"}}/>
         <Skeleton w={38} h={38} r={11}/>
       </div></div>

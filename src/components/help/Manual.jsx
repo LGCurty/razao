@@ -1,4 +1,4 @@
-/* components/help/Manual.jsx — Configurações › Ajuda: o manual com exemplos ao vivo sobre dados fictícios. */
+/* components/help/Manual.jsx — Manual do usuário (menu › Ferramentas): o manual com exemplos ao vivo sobre dados fictícios. */
 import React, { useEffect, useState } from "react";
 import { Donut, Legend, ProgressBar } from "../common/Charts";
 import { Icon } from "../common/Icon";
@@ -122,7 +122,7 @@ const HELP_SECTIONS=[
   {id:"extrato-ajuda",n:8,title:"Importar do banco",kw:"extrato inteligente extrato pdf recibo foto print imagem importar colar texto duplicata auditoria fatura nota de corretagem corretora ativos carteira vários múltiplos bancos open finance pluggy conectar banco sincronizar automático lote arrastar progresso ia modelo transferência entre bancos pagamento de fatura trocar conta em massa"},
   {id:"assistente-ajuda",n:9,title:"Assistente",kw:"assistente perguntar pergunta ia inteligência artificial"},
   {id:"busca-filtros",n:10,title:"Busca e filtros",kw:"busca buscar filtro filtros chip categoria conta data valor status previsto realizado tag"},
-  {id:"panorama-ajuda",n:11,title:"Home",kw:"home resumo panorama patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"},
+  {id:"panorama-ajuda",n:11,title:"Home e Panorama",kw:"home resumo panorama menu busca buscar lupa patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"},
   {id:"backup-seguranca",n:12,title:"Backup e segurança",kw:"backup exportar importar json csv mesclar substituir segurança senha dados bancários"},
   {id:"faq",n:13,title:"Perguntas frequentes",kw:"saldo não bate fatura sumiu esqueci senha offline internet dúvida"},
 ];
@@ -430,9 +430,11 @@ function Ajuda({ helpTarget, onConsumeTarget }){
           </HelpSection>}
 
         {visible("panorama-ajuda") &&
-          <HelpSection id="panorama-ajuda" n={11} title="Home"
-            purpose="A visão consolidada de todos os meses e contas, com os indicadores extras."
+          <HelpSection id="panorama-ajuda" n={11} title="Home e Panorama"
+            purpose="A Home resume o mês; o Panorama (botão “Ver o panorama completo” ou menu ☰ › Painel) é a visão consolidada de todos os meses e contas, com os indicadores extras."
             steps={[
+              "Menu ☰ (no topo, no celular): todas as telas em grupos, com contadores — lançamentos do mês e orçamentos dentro do limite, em atenção e estourados. Tocar em \"Atenção\" ou \"Estourados\" já abre o orçamento filtrado.",
+              "Lupa (busca): acha qualquer movimento de qualquer mês por descrição, categoria, conta, #tag ou valor (\"85\" acha de R$ 85,00 a R$ 85,99; \"85,50\" acha o valor exato). Tocar no resultado abre o movimento.",
               "Saldo por conta soma tudo desde o início; Patrimônio estimado soma contas (sem cartão) + carteira de investimentos.",
               "Histórico de patrimônio guarda um retrato automático do total ao fim de cada mês, num gráfico.",
               "Contas a pagar e lembretes lista o que está previsto pra vencer nos próximos 7 dias, ou já atrasado.",

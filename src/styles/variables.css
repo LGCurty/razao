@@ -3,7 +3,7 @@
 .rz{
   --bg:#F6F7F9;--surface:#FFFFFF;--surface-2:#F1F3F7;--hairline:#E4E7EE;
   --text:#0F1218;--text-mut:#5C6577;
-  --accent:#3E5266;--accent-deep:#26323F;
+  --accent:#B45309;--accent-deep:#92400E;--on-accent:#FFFFFF;
   --pos:#12805F;--neg:#C2382F;--inv:#3B63C4;--warn:#B87C10;--trf:#2E93A3;
   --pos-bg:color-mix(in srgb, var(--pos) 10%, transparent);
   --neg-bg:color-mix(in srgb, var(--neg) 10%, transparent);
@@ -18,9 +18,10 @@
   min-height:100vh;width:100%;-webkit-font-smoothing:antialiased;
 }
 .rz.dark{
-  --bg:#08090D;--surface:#0F1117;--surface-2:#151821;--hairline:#1E222C;
-  --text:#EDEFF4;--text-mut:#98A0B3;
-  --accent:#5C7690;--accent-deep:#3E5266;
+  /* grafite da logo (#1F2328) como base: fundo um tom abaixo, cartões no tom da logo */
+  --bg:#15181C;--surface:#1C2025;--surface-2:#23282E;--hairline:#2D333B;
+  --text:#F3F4F6;--text-mut:#9CA3AF;
+  --accent:#FBBF24;--accent-deep:#D97706;--on-accent:#1F2328;
   --pos:#2FB98A;--neg:#E2564D;--inv:#5A8DEE;--warn:#E8B23C;--trf:#46B7C7;
   --pos-bg:color-mix(in srgb, var(--pos) 8%, transparent);
   --neg-bg:color-mix(in srgb, var(--neg) 8%, transparent);

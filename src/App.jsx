@@ -9,7 +9,8 @@ import { Perguntar } from "./components/assistant/Assistant";
 import { Auth, RecoverySetPassword } from "./components/auth/Auth";
 import { Orcamento } from "./components/budget/Budget";
 import { ConfirmHost, SeriesScopeHost, ToastHost, toast } from "./components/common/Feedback";
-import { BrandMark, Icon } from "./components/common/Icon";
+import { Icon } from "./components/common/Icon";
+import { Logo } from "./components/common/Logo";
 import { Money } from "./components/common/Input";
 import { ConflictDialog, LoadErrorScreen, SkeletonScreen } from "./components/common/Loading";
 import { Sheet } from "./components/common/Modal";
@@ -23,7 +24,10 @@ import { Extrato } from "./components/movements/ImportStatement";
 import { Balanco } from "./components/movements/MovementList";
 import { TransactionForm } from "./components/movements/NewMovementForm";
 import { setHelpListener, setTabListener } from "./components/navigation/navEvents";
-import { NAV_SECTIONS, sectionOfView } from "./components/navigation/sections";
+import { NAV_SECTIONS, VIEW_TITLES, sectionOfView } from "./components/navigation/sections";
+import { GlobalSearch } from "./components/navigation/GlobalSearch";
+import { SideNav } from "./components/navigation/SideNav";
+import { PLUGGY_ITEM_STATUS } from "./services/pluggyService";
 import { APP_BUILD, APP_VERSION } from "./config";
 import { CAT_COLOR } from "./domain/categories";
 import { COLOR_THEMES, COLOR_THEME_MAP } from "./domain/themes";
@@ -58,11 +62,15 @@ function App(){
   const [lastView,setLastView]=useState({});
   useEffect(()=>{ const sec=sectionOfView(tab); setLastView(m=>m[sec.key]===tab?m:{...m,[sec.key]:tab}); },[tab]);
   const curSection=sectionOfView(tab);
-  const goSection=(sec)=>setTab(lastView[sec.key]||sec.views[0][0]);
+  const goSection=(sec)=>irPara(lastView[sec.key]||sec.views[0][0]);
   const [helpTarget,setHelpTarget]=useState(null);
   // filtro pendente pra aplicar assim que a aba de destino abrir (ver goToTab) — ex: clicar numa
   // categoria no Panorama chega no Balanço já com aquela categoria filtrada na lista
   const [pendingFilter,setPendingFilter]=useState(null);
+  // menu lateral do celular (botão ☰) e filtro de status do orçamento escolhido no menu
+  const [drawerAberto,setDrawerAberto]=useState(false);
+  const [budgetFiltro,setBudgetFiltro]=useState(null); // null | "ok" | "warn" | "over"
+  const irPara=(view, filtro)=>{ setTab(view); if(view==="orcamento") setBudgetFiltro(filtro||null); };
   useEffect(()=>{ setHelpListener((sectionId)=>{ setHelpTarget(sectionId); setTab("ajuda"); }); return ()=>setHelpListener(null); },[]);
   useEffect(()=>{ setTabListener((t,filter)=>{ setTab(t); if(filter) setPendingFilter(filter); }); return ()=>setTabListener(null); },[]);
   // popover do mês e menu "⋯" são mutuamente exclusivos por construção (só um valor guardado);
@@ -421,6 +429,21 @@ function App(){
   const plannedTotal=useMemo(()=>budgetRows.reduce((s,r)=>s+r.limit,0),[budgetRows]);
   useBudgetAlerts({ rows:budgetRowsHoje, mk:hojeMk, ativo:loadStatus==="ok" && settings?.budgetAlerts!==false, notificar:Boolean(settings?.budgetNotify) });
   const alerts=budgetRows.filter(r=>r.status==="over"||r.status==="warn");
+  // contadores do menu lateral: movimentos do mês aberto, categorias por status, carteira, metas e bancos com problema
+  const navCounts=useMemo(()=>{
+    const estado=(pluggySync&&pluggySync.estado)||{};
+    const bancosErro=(pluggy?.items||[]).filter(c=>{
+      const e=estado[c.id]; const st=PLUGGY_ITEM_STATUS[String(c.lastStatus||"").toUpperCase()];
+      return (e && ["erro","reconectar","parcial"].includes(e.fase)) || (st && st.reconectar) || (!e && c.lastError);
+    }).length;
+    return {
+      movimentos: monthBucket(vKey).itens.length,
+      orcOk: budgetRows.filter(r=>r.status==="ok").length,
+      orcWarn: budgetRows.filter(r=>r.status==="warn").length,
+      orcOver: budgetRows.filter(r=>r.status==="over").length,
+      ativos: (holdings||[]).length, metas: (goals||[]).length, bancosErro,
+    };
+  },[monthIndex,vKey,budgetRows,holdings,goals,pluggy,pluggySync&&pluggySync.estado]);
   const byCatChart=useMemo(()=>Object.entries(flowSpentByCat).sort((a,b)=>b[1]-a[1]).map(([name,value])=>({name,value,color:CAT_COLOR[name]||"var(--text-mut)"})),[flowSpentByCat]);
   const acctName=(id)=>accounts.find(a=>a.id===id);
   const sparkline=useMemo(()=>{
@@ -524,20 +547,19 @@ function App(){
   // cor de marca escolhida em Configurações > Personalização: sobrescreve --accent/--accent-deep
   // via style inline (maior especificidade que a regra .rz/.rz.dark do CSS), sem duplicar toda a
   // paleta — só o acento muda, o resto dos tokens do tema continua vindo do CSS normalmente
-  const colorTheme = COLOR_THEME_MAP[settings?.colorTheme] || COLOR_THEME_MAP.aco;
+  const colorTheme = COLOR_THEME_MAP[settings?.colorTheme] || COLOR_THEME_MAP.razao;
   const themeVars = theme==="dark" ? colorTheme.dark : colorTheme.light;
 
   return (
     <AuthProvider session={session}>
     <DataProvider data={data} update={update} pluggySync={pluggySync}>
     <ThemeProvider theme={theme} setTheme={(t)=>update({theme:t})}>
-    <div className={"rz "+theme} style={{"--accent":themeVars.accent,"--accent-deep":themeVars.deep}}>
+    <div className={"rz app "+theme} style={{"--accent":themeVars.accent,"--accent-deep":themeVars.deep,"--on-accent":themeVars.on||"#FFFFFF"}}>
       <div className={"topbar"+(scrolled?" scrolled":"")}>
         <div className="topbar-in">
-          <div className="brandmark">
-            <BrandMark/>
-            <div className="brandtext"><b>Razão</b><span>finanças pessoais</span></div>
-          </div>
+          {/* celular: ☰ abre o menu em grupos; computador: o menu fica fixo ao lado e aqui vai o título da tela */}
+          <button className="iconbtn menubtn" aria-label="Abrir menu" aria-expanded={drawerAberto} onClick={()=>setDrawerAberto(true)}><Icon name="menu" size={19}/></button>
+          <h1 className="pagetitle">{VIEW_TITLES[tab]||"Razão"}</h1>
           <div className="monthpill">
             <button className="mbtn" aria-label="Mês anterior" onClick={()=>moveMonth(-1)}><Icon name="seta-esquerda" size={16}/></button>
             <button className="monthlabel" ref={monthTriggerRef} aria-expanded={monthPicker} onClick={()=>setMonthPicker(p=>!p)}>{monthLabel}<Icon name="chevron-baixo" size={12}/></button>
@@ -565,40 +587,26 @@ function App(){
                 <span>{saveState==="saving"?"Salvando…":saveState==="saved"?"Salvo":"Falha ao salvar"}</span>
                 {saveState==="erro" && <button className="saveretry" onClick={retrySaveNow}>Tentar de novo</button>}
               </span>}
+            <GlobalSearch txs={txs} accounts={accounts} onOpen={(t)=>openEditMobile(t)}/>
             <ThemeToggle/>
-            <button className={"iconbtn"+(curSection.key==="config"?" on":"")} aria-label="Configurações" onClick={()=>setTab("preferencias")}><Icon name="config" size={17}/></button>
             <input ref={fileRef} type="file" accept="application/json" style={{display:"none"}} onChange={importData}/>
           </div>
         </div>
       </div>
 
+      <SideNav modo="fixo" tab={tab} budgetFiltro={budgetFiltro} counts={navCounts} onGo={irPara} onAction={(a)=>{ if(a==="novo") openAdd(); }}
+        session={session} theme={theme} version={APP_VERSION}/>
+      <SideNav modo="drawer" aberto={drawerAberto} onClose={()=>setDrawerAberto(false)} tab={tab} budgetFiltro={budgetFiltro} counts={navCounts}
+        onGo={irPara} onAction={(a)=>{ if(a==="novo") openAdd(); }} session={session} theme={theme} version={APP_VERSION}/>
+
       <div className="wrap">
         <div className="shell">
-          <nav className="sidebar" aria-label="Navegação principal">
-            <div className="navgroup">
-              {NAV_SECTIONS.map(sec=>{
-                const on=curSection.key===sec.key;
-                return (
-                  <button key={sec.key} className={"navitem"+(on?" on":"")} data-tip={sec.label} aria-current={on?"page":undefined} onClick={()=>goSection(sec)}>
-                    <span className="navic"><Icon name={sec.icon} size={18}/></span><span className="navlbl">{sec.label}</span>
-                  </button>);
-              })}
-            </div>
-            <div className="navfooter">
-              <span className="navavatar">{session?session.user.email[0].toUpperCase():<Icon name="contas" size={14}/>}</span>
-              <span className="navlbl2">
-                <b>{session?session.user.email.split("@")[0]:"Modo local"}</b>
-                <small>{session?"Conta conectada":"Somente neste aparelho"}</small>
-                <small className="ver">versão {APP_VERSION}</small>
-              </span>
-            </div>
-          </nav>
 
           <div className="tabcontent">
             {curSection.views.length>1 &&
               <div className="subnav" role="tablist" aria-label={curSection.label}>
                 {curSection.views.map(([k,l])=>
-                  <button key={k} role="tab" aria-selected={tab===k} className={tab===k?"on":""} onClick={()=>setTab(k)}>{l}</button>)}
+                  <button key={k} role="tab" aria-selected={tab===k} className={tab===k?"on":""} onClick={()=>irPara(k)}>{l}</button>)}
               </div>}
             {!sb && <div className="banner">Modo local: os dados ficam só neste aparelho. Configure o Supabase no início do arquivo para ter login e sincronização entre dispositivos.</div>}
             {offlineReadOnly && <div className="banner err">Sem conexão — mostrando a última versão salva. Alterações não serão gravadas até a conexão voltar.</div>}
@@ -608,10 +616,11 @@ function App(){
                 <button className="sbtn" onClick={()=>window.location.reload()}><Icon name="brilho" size={14}/> Atualizar agora</button>
               </div>}
             {tab==="geral" && <HomeDashboard {...{txs,accounts,monthIndex,vKey,monthLabel,totals,budgetRows,pluggy}}/>}
-            {tab==="geral" && <div className="sectionhead">Panorama completo</div>}
-            {tab==="geral" && <Geral {...{txs,accounts,holdings,view,onSelectMonth:selectMonth,monthIndex,update,patrimonyHistory,recaps,aiModel:settings?.aiModel||"rapido"}}/>}
+            {tab==="geral" &&
+              <button className="sbtn panolink" onClick={()=>setTab("panorama")}><Icon name="grafico" size={15}/> Ver o panorama completo <Icon name="seta-direita" size={14}/></button>}
+            {tab==="panorama" && <Geral {...{txs,accounts,holdings,view,onSelectMonth:selectMonth,monthIndex,update,patrimonyHistory,recaps,aiModel:settings?.aiModel||"rapido"}}/>}
             {tab==="balanco" && <Balanco {...{grouped,monthLabel,totals,prevTotals,sparkline,plannedTotal,alerts,byCatChart,acctName,txs,view,accounts,onSelectMonth:selectMonth,update,isDesktop,onEditMobile:openEditMobile,monthIndex,categoryMemory,hourlyWageCents:settings?.hourlyWageCents||0,budgetRows,aiModel:settings?.aiModel||"rapido",pendingFilter,onConsumePendingFilter:()=>setPendingFilter(null)}}/>}
-            {tab==="orcamento" && <Orcamento {...{budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts,budgetNotify:Boolean(settings?.budgetNotify)}}/>}
+            {tab==="orcamento" && <Orcamento {...{budgetFiltro,onBudgetFiltro:setBudgetFiltro,budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts,budgetNotify:Boolean(settings?.budgetNotify)}}/>}
             {tab==="metas" && <Metas {...{goals,update,txs}}/>}
             {tab==="investimentos" && <Investimentos {...{holdings,update,monthIndex,monthLabel,txs,view,onSelectMonth:selectMonth}}/>}
             {tab==="extrato" && <Extrato {...{accounts,update,txs,aiModel:settings?.aiModel||"rapido",pluggy,categoryMemory,autoSync:pluggySync,revisarAntes:settings?.pluggyReview}}/>}
@@ -665,7 +674,7 @@ function App(){
             <div className="sub" style={{marginBottom:8}}>Cor de marca do site</div>
             <div className="colorgrid">
               {COLOR_THEMES.map(t=>{
-                const active=(settings?.colorTheme||"aco")===t.id;
+                const active=(settings?.colorTheme||"razao")===t.id;
                 const swatch = theme==="dark" ? t.dark.accent : t.light.accent;
                 return (
                   <button key={t.id} type="button" className={"colorswatch"+(active?" on":"")}
@@ -676,7 +685,7 @@ function App(){
                 );
               })}
             </div>
-            <div className="hint">{COLOR_THEME_MAP[settings?.colorTheme||"aco"].name} — usada em botões, navegação ativa e destaques. As cores de ganho, gasto, investimento e aviso não mudam com a escolha aqui.</div>
+            <div className="hint">{COLOR_THEME_MAP[settings?.colorTheme||"razao"].name} — usada em botões, navegação ativa e destaques. As cores de ganho, gasto, investimento e aviso não mudam com a escolha aqui.</div>
             <div className="sheetdivider"/>
             <div className="kv"><span className="kk">Versão do app</span><span className="vv">{APP_VERSION}</span></div>
             <div className="kv"><span className="kk">Atualizado em</span><span className="vv">{fmtDateBR(APP_BUILD)}</span></div>

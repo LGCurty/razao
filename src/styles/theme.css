@@ -1,6 +1,6 @@
 /* theme.css: reset, fundo, barras de rolagem e tipografia base — extraído do <style> do index.html de arquivo único. */
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#08090D}
+body{background:#15181C}
 
 .rz.dark ::-webkit-scrollbar{width:10px;height:10px}
 .rz.dark ::-webkit-scrollbar-track{background:transparent}
