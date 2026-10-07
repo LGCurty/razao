@@ -9,6 +9,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL || "https://xgdigegpxnoybklmyeyq.s
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
 
+const { enviarResumos } = require("./_resumo-mensal");
+
 module.exports = async (req, res) => {
   // quando CRON_SECRET está configurado na Vercel, ela assina a chamada agendada com esse cabeçalho.
   // Sem essa variável, o endpoint continua funcionando (é inofensivo: só lê, não muda nada) — a
@@ -26,7 +28,14 @@ module.exports = async (req, res) => {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/finance_data?select=user_id&limit=1`, {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
     });
-    res.status(200).json({ ok: r.ok, status: r.status, at: new Date().toISOString() });
+    // dia 1 (UTC — o cron roda às 03h UTC, meia-noite em Brasília): aproveita a mesma chamada agendada
+    // para mandar o resumo do mês que fechou, sem precisar de um segundo cron no vercel.json
+    let resumo = null;
+    if (new Date().getUTCDate() === 1) {
+      try { resumo = await enviarResumos({ env: process.env }); }
+      catch (e) { resumo = { ok: false, error: e.message || "Falha ao enviar os resumos." }; }
+    }
+    res.status(200).json({ ok: r.ok, status: r.status, at: new Date().toISOString(), resumo });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message || "Falha ao pingar o Supabase." });
   }

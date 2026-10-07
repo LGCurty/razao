@@ -581,6 +581,29 @@ body{background:#08090D}
 .rz .formerrs{list-style:none;margin:0 0 12px;padding:10px 12px;border-radius:10px;background:var(--neg-bg);color:var(--neg);font-size:12px;line-height:1.6}
 .rz .cathint{margin:-6px 0 12px;font-size:11px}
 
+/* ===================== orçamento ===================== */
+.rz .budtable{display:flex;flex-direction:column;margin-top:4px}
+.rz .budtr{display:grid;grid-template-columns:minmax(0,1.6fr) 1fr 1fr 60px 130px;gap:10px;align-items:center;font-size:13px}
+.rz .budth{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-mut);font-weight:600;padding:6px 0;border-bottom:1px solid var(--hairline)}
+.rz .budtrwrap{padding:10px 0 8px;border-bottom:1px solid var(--surface-2)}
+.rz .budtrwrap .budtr{margin-bottom:6px}
+.rz .budtrwrap .statusdot{margin-top:0}
+.rz .budedit{display:flex;flex-direction:column}
+.rz .budeditrow{display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid var(--surface-2)}
+.rz .budeditrow .amount{margin-bottom:0}
+.rz .budeditrow .bname small{display:block;font-size:11px;font-weight:400;color:var(--text-mut);margin-top:2px}
+.rz .budalerts{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--surface-2);font-size:12px;color:var(--text-mut)}
+.rz .budalerts>span{display:flex;align-items:center;gap:6px}
+.rz .linkbtn{border:none;background:none;color:var(--inv);cursor:pointer;font-size:inherit;text-decoration:underline;padding:0}
+@media (max-width:640px){
+  .rz .budth{display:none}
+  .rz .budtr{grid-template-columns:1fr 1fr 1fr;row-gap:4px}
+  .rz .budtr .bname{grid-column:1/-1}
+  .rz .budtr [data-l]::before{content:attr(data-l) " ";color:var(--text-mut);font-size:11px}
+  .rz .budtr>span:last-child{grid-column:1/-1}
+  .rz .budeditrow{grid-template-columns:1fr}
+}
+
 /* ===================== Home ===================== */
 .rz .homehead{grid-column:1/-1;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .rz .hometitle{font-family:'Sora',sans-serif;font-size:22px;font-weight:600;letter-spacing:-.01em;margin-top:2px}
@@ -657,7 +680,7 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.45";
+const APP_VERSION = "1.2.47";
 const APP_BUILD = "2026-10-07";
 
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
@@ -1709,7 +1732,7 @@ function migrate(data){
   // 4.1 — escolha do motor de IA usada na leitura de documentos ("rapido" | "cuidadoso")
   // 4.2 — cor de marca escolhível (Configurações > Personalização); "aco" é o padrão de fábrica
   // 6.0 — Open Finance: "revisar antes de salvar" desligado = sincroniza sozinho e grava direto
-  d.settings = { hourlyWageCents:0, aiModel:"rapido", colorTheme:"aco", pluggyReview:false, ...(d.settings||{}) };
+  d.settings = { hourlyWageCents:0, aiModel:"rapido", colorTheme:"aco", pluggyReview:false, budgetAlerts:true, budgetNotify:false, emailSummary:false, ...(d.settings||{}) };
   if(!AI_MODELS[d.settings.aiModel]) d.settings.aiModel = "rapido";
   if(!COLOR_THEME_MAP[d.settings.colorTheme]) d.settings.colorTheme = "aco";
   // 6.0 — categorias da planilha: converte nomes antigos (lançamentos, orçamentos, exceções do mês,
@@ -2460,6 +2483,57 @@ function RecoverySetPassword({ onDone }){
 }
 
 /* =========================== APP =========================== */
+/* linhas do orçamento de um mês: limite (exceção do mês, se houver, senão o padrão), gasto no mês da
+   fatura e status — "warn" a partir de 80%, "over" a partir de 100% */
+function budgetRowsFor(budgets, budgetExceptions, mk, spentByCat, catHistory){
+  const exceptionsThisMonth=(budgetExceptions||{})[mk]||{};
+  const cats=new Set([...Object.keys(budgets||{}),...Object.keys(spentByCat||{}),...Object.keys(exceptionsThisMonth)]);
+  return [...cats].map(c=>{
+    const isException=Object.prototype.hasOwnProperty.call(exceptionsThisMonth,c);
+    const limit=isException?exceptionsThisMonth[c]:((budgets||{})[c]||0);
+    const spent=(spentByCat||{})[c]||0,pct=limit>0?spent/limit:0;
+    const status=limit===0?"none":pct>=1?"over":pct>=0.8?"warn":"ok";
+    return{cat:c,limit,spent,pct,status,hist:(catHistory||{})[c],isException};
+  }).sort((a,b)=>b.spent-a.spent);
+}
+
+/* ---- alertas de orçamento ----
+   Quando uma categoria do mês corrente passa de 80% e depois de 100% do limite, avisa UMA vez por nível
+   em cada mês: um aviso na tela e, se a pessoa ativou, uma notificação do aparelho (via service worker,
+   que funciona também com o app instalado na tela inicial). O registro do que já foi avisado fica neste
+   aparelho. Notificação com o app totalmente fechado exigiria um servidor de push — fora do escopo. */
+const ALERTAS_KEY="razao_alertas_orcamento";
+async function notificarAparelho(titulo, corpo, tag){
+  if(typeof window==="undefined" || !("Notification" in window) || Notification.permission!=="granted") return false;
+  try{
+    const reg=navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if(reg && reg.showNotification){ await reg.showNotification(titulo,{ body:corpo, tag, renotify:true }); return true; }
+  }catch(_){}
+  try{ new Notification(titulo,{ body:corpo, tag }); return true; }catch(_){ return false; }
+}
+function useBudgetAlerts({ rows, mk, ativo, notificar }){
+  useEffect(()=>{
+    if(!ativo) return;
+    let marcados={};
+    try{ marcados=JSON.parse(localStorage.getItem(ALERTAS_KEY)||"{}")||{}; }catch(_){ marcados={}; }
+    const doMes={...(marcados[mk]||{})};
+    const novos=[];
+    rows.forEach(r=>{
+      if(!(r.limit>0)) return;
+      const nivel=r.pct>=1?100:r.pct>=0.8?80:0;
+      if(nivel && (doMes[r.cat]||0)<nivel){ novos.push({ r, nivel }); doMes[r.cat]=nivel; }
+    });
+    if(!novos.length) return;
+    try{ localStorage.setItem(ALERTAS_KEY, JSON.stringify({ [mk]:doMes })); }catch(_){}
+    novos.forEach(({ r, nivel })=>{
+      const titulo = nivel>=100 ? `Orçamento de ${r.cat} estourado` : `${r.cat}: ${Math.round(r.pct*100)}% do orçamento`;
+      const corpo = `${brl(r.spent)} de ${brl(r.limit)} este mês.`;
+      toast(`${titulo} — ${corpo}`, nivel>=100?"error":"default");
+      if(notificar) notificarAparelho(titulo, corpo, "orcamento-"+r.cat);
+    });
+  },[rows, mk, ativo, notificar]);
+}
+
 /* ---- espelho relacional (tabelas bank_accounts, movements e budgets no Supabase) ----
    finance_data continua sendo a fonte principal. Depois de cada salvamento confirmado, a mesma informação
    vai, normalizada, para as tabelas relacionais (ver supabase/migrations) — só o que mudou desde a última
@@ -3067,18 +3141,12 @@ function App(){
     return o;
   },[monthIndex]);
   // orçamento variável: usa a exceção do mês exibido quando existir, senão o padrão da categoria
-  const budgetRows=useMemo(()=>{
-    const exceptionsThisMonth=budgetExceptions[vKey]||{};
-    const cats=new Set([...Object.keys(budgets),...Object.keys(flowSpentByCat),...Object.keys(exceptionsThisMonth)]);
-    return [...cats].map(c=>{
-      const isException=Object.prototype.hasOwnProperty.call(exceptionsThisMonth,c);
-      const limit=isException?exceptionsThisMonth[c]:(budgets[c]||0);
-      const spent=flowSpentByCat[c]||0,pct=limit>0?spent/limit:0;
-      const status=limit===0?"none":pct>=1?"over":pct>=0.8?"warn":"ok";
-      return{cat:c,limit,spent,pct,status,hist:catHistory[c],isException};
-    }).sort((a,b)=>b.spent-a.spent);
-  },[budgets,budgetExceptions,vKey,flowSpentByCat,catHistory]);
+  const budgetRows=useMemo(()=>budgetRowsFor(budgets,budgetExceptions,vKey,flowSpentByCat,catHistory),[budgets,budgetExceptions,vKey,flowSpentByCat,catHistory]);
+  // alertas olham sempre o mês de HOJE, mesmo com outro mês aberto na tela
+  const hojeMk=todayISO().slice(0,7);
+  const budgetRowsHoje=useMemo(()=>hojeMk===vKey ? budgetRows : budgetRowsFor(budgets,budgetExceptions,hojeMk,monthBucket(hojeMk).porCategoria,catHistory),[budgetRows,budgets,budgetExceptions,hojeMk,vKey,monthIndex,catHistory]);
   const plannedTotal=useMemo(()=>budgetRows.reduce((s,r)=>s+r.limit,0),[budgetRows]);
+  useBudgetAlerts({ rows:budgetRowsHoje, mk:hojeMk, ativo:loadStatus==="ok" && settings?.budgetAlerts!==false, notificar:Boolean(settings?.budgetNotify) });
   const alerts=budgetRows.filter(r=>r.status==="over"||r.status==="warn");
   const byCatChart=useMemo(()=>Object.entries(flowSpentByCat).sort((a,b)=>b[1]-a[1]).map(([name,value])=>({name,value,color:CAT_COLOR[name]||"var(--text-mut)"})),[flowSpentByCat]);
   const acctName=(id)=>accounts.find(a=>a.id===id);
@@ -3267,7 +3335,7 @@ function App(){
             {tab==="geral" && <div className="sectionhead">Panorama completo</div>}
             {tab==="geral" && <Geral {...{txs,accounts,holdings,view,onSelectMonth:selectMonth,monthIndex,update,patrimonyHistory,recaps,aiModel:settings?.aiModel||"rapido"}}/>}
             {tab==="balanco" && <Balanco {...{grouped,monthLabel,totals,prevTotals,sparkline,plannedTotal,alerts,byCatChart,acctName,txs,view,accounts,onSelectMonth:selectMonth,update,isDesktop,onEditMobile:openEditMobile,monthIndex,categoryMemory,hourlyWageCents:settings?.hourlyWageCents||0,budgetRows,aiModel:settings?.aiModel||"rapido",pendingFilter,onConsumePendingFilter:()=>setPendingFilter(null)}}/>}
-            {tab==="orcamento" && <Orcamento {...{budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts}}/>}
+            {tab==="orcamento" && <Orcamento {...{budgetRows,budgets,budgetExceptions,update,plannedTotal,totalSpent:totals.exp,monthLabel,txs,view,accounts,budgetNotify:Boolean(settings?.budgetNotify)}}/>}
             {tab==="metas" && <Metas {...{goals,update,txs}}/>}
             {tab==="investimentos" && <Investimentos {...{holdings,update,monthIndex,monthLabel,txs,view,onSelectMonth:selectMonth}}/>}
             {tab==="extrato" && <Extrato {...{accounts,update,txs,aiModel:settings?.aiModel||"rapido",pluggy,categoryMemory,autoSync:pluggySync,revisarAntes:settings?.pluggyReview}}/>}
@@ -3287,6 +3355,20 @@ function App(){
             <div className="sub" style={{marginBottom:6}}>Valor da sua hora de trabalho (opcional)</div>
             <Money cents={settings?.hourlyWageCents||0} onChange={v=>update(d=>({settings:{...d.settings,hourlyWageCents:v}}))} small/>
             <div className="hint">Preenchendo, os lançamentos passam a mostrar quantas horas de trabalho aquele valor representa. Deixe em R$ 0,00 para desligar.</div>
+            <div className="sheetdivider"/>
+            <div className="sub" style={{marginBottom:6}}>Avisos</div>
+            <label className="toggle">
+              <input type="checkbox" checked={settings?.budgetAlerts!==false} onChange={e=>update(d=>({settings:{...d.settings,budgetAlerts:e.target.checked}}))}/>
+              Avisar quando uma categoria passar de 80% e de 100% do orçamento
+            </label>
+            {sb &&
+              <React.Fragment>
+                <label className="toggle">
+                  <input type="checkbox" checked={Boolean(settings?.emailSummary)} onChange={e=>update(d=>({settings:{...d.settings,emailSummary:e.target.checked}}))}/>
+                  Receber por e-mail o resumo do mês, todo dia 1
+                </label>
+                <div className="hint" style={{marginTop:-6}}>Vai para {session?session.user.email:"o e-mail da sua conta"}: renda, despesas, resultado e as categorias que passaram do limite. Depende do envio de e-mails estar configurado no servidor (ver api/monthly-summary.js).</div>
+              </React.Fragment>}
             <div className="sheetdivider"/>
             <div className="sub" style={{marginBottom:6}}>Open Finance (bancos conectados)</div>
             <label className="toggle">
@@ -4852,10 +4934,7 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
 Geral = React.memo(Geral);
 
 /* ---------- ORÇAMENTO ---------- */
-function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal, totalSpent, monthLabel, txs, view, accounts }){
-  const [openCat,setOpenCat]=useState(null);
-  const [val,setVal]=useState(0);
-  const [scope,setScope]=useState("default"); // "default" (todos os meses) | "month" (exceção deste mês)
+function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal, totalSpent, monthLabel, txs, view, accounts, budgetNotify }){
   const allCats=CATS.gasto.map(c=>c[0]);
   const vKey=`${view.getFullYear()}-${String(view.getMonth()+1).padStart(2,"0")}`;
 
@@ -4869,19 +4948,43 @@ function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal
       return {budgetExceptions:next};
     });
   };
-  const activeCat=openCat||allCats[0];
-  const saveBudget=()=>{ if(scope==="month") setBudgetException(activeCat,val); else setBudgetDefault(activeCat,val); toast("Limite salvo.","success"); };
-  const removeBudget=()=>{ if(scope==="month") setBudgetException(activeCat,0); else setBudgetDefault(activeCat,0); setVal(0); };
-  const pickCategory=(c)=>{
-    setOpenCat(c);
-    const hasExc=budgetExceptions[vKey]?.[c]!=null;
-    setScope(hasExc?"month":"default");
-    setVal(hasExc?budgetExceptions[vKey][c]:(budgets[c]||0));
-  };
-  const pickScope=(s)=>{
-    setScope(s);
-    setVal(s==="month"?(budgetExceptions[vKey]?.[activeCat]||0):(budgets[activeCat]||0));
-  };
+  // "Editar orçamentos": todas as categorias de uma vez, valendo para todos os meses (padrão) ou só para o mês aberto
+  const [editando,setEditando]=useState(false);
+  const [escopo,setEscopo]=useState("default");
+  const [rascunho,setRascunho]=useState({});
+  const valoresDo=(esc)=>Object.fromEntries(allCats.map(c=>[c, esc==="month" ? ((budgetExceptions[vKey]||{})[c] ?? (budgets[c]||0)) : (budgets[c]||0)]));
+  function abrirEditor(){ setEscopo("default"); setRascunho(valoresDo("default")); setEditando(true); }
+  function trocarEscopo(esc){ setEscopo(esc); setRascunho(valoresDo(esc)); }
+  function salvarEditor(){
+    if(escopo==="default"){
+      update(d=>{
+        const b={...d.budgets};
+        allCats.forEach(c=>{ const v=rascunho[c]||0; if(v>0) b[c]=v; else delete b[c]; });
+        return { budgets:b };
+      });
+    } else {
+      update(d=>{
+        const mapa={...((d.budgetExceptions||{})[vKey]||{})};
+        allCats.forEach(c=>{ const v=rascunho[c]||0; if(v===((d.budgets||{})[c]||0)) delete mapa[c]; else mapa[c]=v; });
+        const next={...d.budgetExceptions};
+        if(Object.keys(mapa).length) next[vKey]=mapa; else delete next[vKey];
+        return { budgetExceptions:next };
+      });
+    }
+    setEditando(false);
+    toast("Orçamentos salvos.","success");
+  }
+  const [notifPerm,setNotifPerm]=useState(()=> (typeof window!=="undefined" && "Notification" in window) ? Notification.permission : "unsupported");
+  async function ativarNotificacoes(){
+    try{
+      const r=await Notification.requestPermission();
+      setNotifPerm(r);
+      if(r==="granted"){
+        update(d=>({settings:{...d.settings,budgetNotify:true}}));
+        notificarAparelho("Alertas de orçamento ligados","Você vai receber um aviso quando uma categoria passar de 80% do limite.","orcamento-teste");
+      } else toast("Sem permissão, os avisos continuam aparecendo só na tela.","default");
+    }catch(_){ toast("Este navegador não deixou ativar as notificações.","error"); }
+  }
 
   // mesma base do restante do orçamento: gasto conta no mês da fatura do cartão, não no mês da compra
   const prevSpentByCat=useMemo(()=>{
@@ -4957,53 +5060,74 @@ function Orcamento({ budgetRows, budgets, budgetExceptions, update, plannedTotal
 
   return (
     <React.Fragment>
-      <div className="card g-6">
-        <h3>Orçamento de {monthLabel} <span className="num" style={{fontSize:14,fontWeight:500,color:totalSpent>plannedTotal&&plannedTotal>0?"var(--neg)":"var(--text)"}}>{brl(totalSpent)} / {brl(plannedTotal)}</span> <HelpIcon section="orcamento-ajuda"/></h3>
-        <div className="sub">Defina quanto quer gastar em cada categoria. O histórico ajuda a ser realista. Gastos no cartão contam no mês da fatura, não no mês da compra.</div>
-        {budgetRows.length===0 && <p className="hint">Nenhuma categoria com orçamento ou gasto ainda. Use o cartão "Definir orçamento" para escolher uma categoria e um limite — o histórico de quanto você costuma gastar aparece aqui assim que houver lançamentos.</p>}
-        {budgetRows.map(r=>{
-          const rollover=r.limit>0?r.limit-(prevSpentByCat[r.cat]||0):0;
-          return(
-          <div className="budrow" key={r.cat}>
-            <div className="bh">
-              <span className="bname"><Icon name={CAT_ICON[r.cat]||"outros"} size={15}/> {r.cat}
-                {r.status==="over" && <span className="tag over">estourou</span>}
-                {r.status==="warn" && <span className="tag warn">atenção</span>}
-                {r.status==="ok" && <span className="tag ok">no limite</span>}
-              </span>
-              <span className="bval">{brl(r.spent)}{r.limit>0 && <span style={{color:"var(--text-mut)"}}> / {brl(r.limit)}</span>}</span>
+      <div className="card g-12">
+        <h3>
+          <span>Orçamento de {monthLabel} <span className="num" style={{fontSize:14,fontWeight:500,color:totalSpent>plannedTotal&&plannedTotal>0?"var(--neg)":"var(--text-mut)"}}>{brl(totalSpent)} / {brl(plannedTotal)}</span></span>
+          <span style={{display:"flex",alignItems:"center",gap:6}}>
+            {!editando && <button className="sbtn" onClick={abrirEditor}><Icon name="editar" size={14}/> Editar orçamentos</button>}
+            <HelpIcon section="orcamento-ajuda"/>
+          </span>
+        </h3>
+        <div className="sub">Os limites valem todo mês e o gasto recomeça do zero no dia 1 — cada mês é medido separado. Gastos no cartão contam no mês da fatura, não no mês da compra.</div>
+
+        {editando
+          ? <div className="budedit">
+              <div className="seg" style={{marginBottom:12}}>
+                <button className={escopo==="default"?"on in":""} onClick={()=>trocarEscopo("default")}>Todos os meses</button>
+                <button className={escopo==="month"?"on inv":""} onClick={()=>trocarEscopo("month")}>Só {monthLabel}</button>
+              </div>
+              <div className="hint" style={{marginTop:-4,marginBottom:10}}>{escopo==="default"
+                ? "Limite padrão de cada categoria. Deixe em R$ 0,00 para não ter limite."
+                : `Limite só para ${monthLabel} (ex.: dezembro com presentes). O que ficar igual ao padrão não vira exceção.`}</div>
+              {allCats.map(c=>(
+                <div className="budeditrow" key={c}>
+                  <span className="bname"><Icon name={CAT_ICON[c]||"outros"} size={15}/> {c}{CAT_HINT[c] && <small>{CAT_HINT[c]}</small>}</span>
+                  <Money cents={rascunho[c]||0} onChange={v=>setRascunho(m=>({...m,[c]:v}))} small/>
+                </div>
+              ))}
+              <div className="formactions" style={{marginTop:12}}>
+                <button className="sbtn" onClick={()=>setEditando(false)}>Cancelar</button>
+                <button className="submit" onClick={salvarEditor}>Salvar orçamentos</button>
+              </div>
             </div>
-            <ProgressBar spent={r.spent} limit={r.limit} status={r.status}/>
-            <div className="mm">
-              {r.hist?<>Histórico: mín {brl(r.hist.min)} · média {brl(r.hist.avg)} · máx {brl(r.hist.max)}</>:"Sem histórico ainda"}
-              {" · "}
-              <button style={{border:"none",background:"none",color:"var(--inv)",cursor:"pointer",fontSize:11,textDecoration:"underline",padding:0}} onClick={()=>pickCategory(r.cat)}>{r.limit>0?"editar limite":"definir limite"}</button>
-            </div>
-            {r.isException &&
-              <div className="mm" style={{color:"var(--inv)"}}>
-                Limite específico de {monthLabel}
-                {" · "}
-                <button style={{border:"none",background:"none",color:"var(--inv)",cursor:"pointer",fontSize:11,textDecoration:"underline",padding:0}} onClick={()=>setBudgetException(r.cat,0)}>remover exceção</button>
-              </div>}
-            {rollover>0 && <div className="mm" style={{color:"var(--pos)"}}>Sobrou {brl(rollover)} do mês passado nesta categoria — dá para remanejar para este mês ou para investimentos.</div>}
-          </div>
-        );})}
-      </div>
-      <div className="card g-6">
-        <h3>Definir orçamento</h3>
-        <div className="sub">Escolha a categoria, o valor e se vale só para {monthLabel} ou todos os meses (planejamento sazonal).</div>
-        <select className="fld" value={activeCat} onChange={e=>pickCategory(e.target.value)} style={{marginBottom:10}}>
-          {allCats.map(c=><option key={c} value={c}>{c}</option>)}
-        </select>
-        <div className="seg" style={{marginBottom:12}}>
-          <button className={scope==="default"?"on in":""} onClick={()=>pickScope("default")}>Todos os meses</button>
-          <button className={scope==="month"?"on inv":""} onClick={()=>pickScope("month")}>Neste mês ({monthLabel})</button>
-        </div>
-        <Money cents={val} onChange={setVal} small onEnter={saveBudget}/>
-        <div style={{display:"flex",gap:8,marginTop:10}}>
-          <button className="sbtn primary" onClick={saveBudget}>Salvar limite</button>
-          {val>0 && <button className="sbtn" onClick={removeBudget}>Remover</button>}
-        </div>
+          : <React.Fragment>
+              {budgetRows.length===0 && <p className="hint">Nenhuma categoria com orçamento ou gasto ainda. Toque em "Editar orçamentos" para definir os limites — o histórico de quanto você costuma gastar aparece aqui assim que houver lançamentos.</p>}
+              {budgetRows.length>0 &&
+                <div className="budtable" role="table" aria-label={`Orçamento de ${monthLabel}`}>
+                  <div className="budtr budth" role="row">
+                    <span role="columnheader">Categoria</span><span role="columnheader">Orçado</span><span role="columnheader">Gasto</span><span role="columnheader">%</span><span role="columnheader">Status</span>
+                  </div>
+                  {budgetRows.map(r=>{
+                    const rollover=r.limit>0?r.limit-(prevSpentByCat[r.cat]||0):0;
+                    return (
+                      <div className="budtrwrap" key={r.cat} role="rowgroup">
+                        <div className="budtr" role="row">
+                          <span className="bname" role="cell"><Icon name={CAT_ICON[r.cat]||"outros"} size={15}/> {r.cat}</span>
+                          <span className="num" role="cell" data-l="Orçado">{r.limit>0?brl(r.limit):"—"}</span>
+                          <span className="num" role="cell" data-l="Gasto">{brl(r.spent)}</span>
+                          <span className="num" role="cell" data-l="%">{r.limit>0?`${Math.round(r.pct*100)}%`:"—"}</span>
+                          <span role="cell"><StatusDot status={r.status}/></span>
+                        </div>
+                        <ProgressBar spent={r.spent} limit={r.limit} status={r.status}/>
+                        <div className="mm">
+                          {r.hist?<>Histórico: mín {brl(r.hist.min)} · média {brl(r.hist.avg)} · máx {brl(r.hist.max)}</>:"Sem histórico ainda"}
+                          {r.isException && <> · <span style={{color:"var(--inv)"}}>limite específico de {monthLabel}</span> · <button className="linkbtn" onClick={()=>setBudgetException(r.cat,0)}>remover exceção</button></>}
+                        </div>
+                        {rollover>0 && <div className="mm" style={{color:"var(--pos)"}}>Sobrou {brl(rollover)} do mês passado nesta categoria — dá para remanejar para este mês ou para investimentos.</div>}
+                      </div>);
+                  })}
+                </div>}
+              <div className="budalerts">
+                <span><Icon name="alerta" size={14}/> Alertas: aviso quando uma categoria passa de 80% e de 100% do limite.</span>
+                {typeof window!=="undefined" && "Notification" in window
+                  ? (notifPerm==="granted" && budgetNotify
+                      ? <button className="linkbtn" onClick={()=>update(d=>({settings:{...d.settings,budgetNotify:false}}))}>Notificações do aparelho ligadas · desligar</button>
+                      : notifPerm==="denied"
+                        ? <span className="mm">Notificações bloqueadas no navegador — libere nas permissões do site para receber.</span>
+                        : <button className="sbtn" onClick={ativarNotificacoes}><Icon name="brilho" size={14}/> Ativar notificações no aparelho</button>)
+                  : <span className="mm">Este navegador não oferece notificações; os avisos aparecem na tela.</span>}
+              </div>
+            </React.Fragment>}
       </div>
 
       <div className="card g-12">

@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.45 · compilado em 2026-10-07T00:45:11.139Z */
+   Versão 1.2.47 · compilado em 2026-10-07T00:53:48.393Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.45";
+const APP_VERSION = "1.2.47";
 const APP_BUILD = "2026-10-07";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -2227,6 +2227,9 @@ function migrate(data) {
     aiModel: "rapido",
     colorTheme: "aco",
     pluggyReview: false,
+    budgetAlerts: true,
+    budgetNotify: false,
+    emailSummary: false,
     ...(d.settings || {})
   };
   if (!AI_MODELS[d.settings.aiModel]) d.settings.aiModel = "rapido";
@@ -3907,6 +3910,105 @@ function RecoverySetPassword({
 }
 
 /* =========================== APP =========================== */
+/* linhas do orçamento de um mês: limite (exceção do mês, se houver, senão o padrão), gasto no mês da
+   fatura e status — "warn" a partir de 80%, "over" a partir de 100% */
+function budgetRowsFor(budgets, budgetExceptions, mk, spentByCat, catHistory) {
+  const exceptionsThisMonth = (budgetExceptions || {})[mk] || {};
+  const cats = new Set([...Object.keys(budgets || {}), ...Object.keys(spentByCat || {}), ...Object.keys(exceptionsThisMonth)]);
+  return [...cats].map(c => {
+    const isException = Object.prototype.hasOwnProperty.call(exceptionsThisMonth, c);
+    const limit = isException ? exceptionsThisMonth[c] : (budgets || {})[c] || 0;
+    const spent = (spentByCat || {})[c] || 0,
+      pct = limit > 0 ? spent / limit : 0;
+    const status = limit === 0 ? "none" : pct >= 1 ? "over" : pct >= 0.8 ? "warn" : "ok";
+    return {
+      cat: c,
+      limit,
+      spent,
+      pct,
+      status,
+      hist: (catHistory || {})[c],
+      isException
+    };
+  }).sort((a, b) => b.spent - a.spent);
+}
+
+/* ---- alertas de orçamento ----
+   Quando uma categoria do mês corrente passa de 80% e depois de 100% do limite, avisa UMA vez por nível
+   em cada mês: um aviso na tela e, se a pessoa ativou, uma notificação do aparelho (via service worker,
+   que funciona também com o app instalado na tela inicial). O registro do que já foi avisado fica neste
+   aparelho. Notificação com o app totalmente fechado exigiria um servidor de push — fora do escopo. */
+const ALERTAS_KEY = "razao_alertas_orcamento";
+async function notificarAparelho(titulo, corpo, tag) {
+  if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return false;
+  try {
+    const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
+    if (reg && reg.showNotification) {
+      await reg.showNotification(titulo, {
+        body: corpo,
+        tag,
+        renotify: true
+      });
+      return true;
+    }
+  } catch (_) {}
+  try {
+    new Notification(titulo, {
+      body: corpo,
+      tag
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+function useBudgetAlerts({
+  rows,
+  mk,
+  ativo,
+  notificar
+}) {
+  useEffect(() => {
+    if (!ativo) return;
+    let marcados = {};
+    try {
+      marcados = JSON.parse(localStorage.getItem(ALERTAS_KEY) || "{}") || {};
+    } catch (_) {
+      marcados = {};
+    }
+    const doMes = {
+      ...(marcados[mk] || {})
+    };
+    const novos = [];
+    rows.forEach(r => {
+      if (!(r.limit > 0)) return;
+      const nivel = r.pct >= 1 ? 100 : r.pct >= 0.8 ? 80 : 0;
+      if (nivel && (doMes[r.cat] || 0) < nivel) {
+        novos.push({
+          r,
+          nivel
+        });
+        doMes[r.cat] = nivel;
+      }
+    });
+    if (!novos.length) return;
+    try {
+      localStorage.setItem(ALERTAS_KEY, JSON.stringify({
+        [mk]: doMes
+      }));
+    } catch (_) {}
+    novos.forEach(({
+      r,
+      nivel
+    }) => {
+      const titulo = nivel >= 100 ? `Orçamento de ${r.cat} estourado` : `${r.cat}: ${Math.round(r.pct * 100)}% do orçamento`;
+      const corpo = `${brl(r.spent)} de ${brl(r.limit)} este mês.`;
+      toast(`${titulo} — ${corpo}`, nivel >= 100 ? "error" : "default");
+      if (notificar) notificarAparelho(titulo, corpo, "orcamento-" + r.cat);
+    });
+  }, [rows, mk, ativo, notificar]);
+}
+
 /* ---- espelho relacional (tabelas bank_accounts, movements e budgets no Supabase) ----
    finance_data continua sendo a fonte principal. Depois de cada salvamento confirmado, a mesma informação
    vai, normalizada, para as tabelas relacionais (ver supabase/migrations) — só o que mudou desde a última
@@ -4914,27 +5016,17 @@ function App() {
     return o;
   }, [monthIndex]);
   // orçamento variável: usa a exceção do mês exibido quando existir, senão o padrão da categoria
-  const budgetRows = useMemo(() => {
-    const exceptionsThisMonth = budgetExceptions[vKey] || {};
-    const cats = new Set([...Object.keys(budgets), ...Object.keys(flowSpentByCat), ...Object.keys(exceptionsThisMonth)]);
-    return [...cats].map(c => {
-      const isException = Object.prototype.hasOwnProperty.call(exceptionsThisMonth, c);
-      const limit = isException ? exceptionsThisMonth[c] : budgets[c] || 0;
-      const spent = flowSpentByCat[c] || 0,
-        pct = limit > 0 ? spent / limit : 0;
-      const status = limit === 0 ? "none" : pct >= 1 ? "over" : pct >= 0.8 ? "warn" : "ok";
-      return {
-        cat: c,
-        limit,
-        spent,
-        pct,
-        status,
-        hist: catHistory[c],
-        isException
-      };
-    }).sort((a, b) => b.spent - a.spent);
-  }, [budgets, budgetExceptions, vKey, flowSpentByCat, catHistory]);
+  const budgetRows = useMemo(() => budgetRowsFor(budgets, budgetExceptions, vKey, flowSpentByCat, catHistory), [budgets, budgetExceptions, vKey, flowSpentByCat, catHistory]);
+  // alertas olham sempre o mês de HOJE, mesmo com outro mês aberto na tela
+  const hojeMk = todayISO().slice(0, 7);
+  const budgetRowsHoje = useMemo(() => hojeMk === vKey ? budgetRows : budgetRowsFor(budgets, budgetExceptions, hojeMk, monthBucket(hojeMk).porCategoria, catHistory), [budgetRows, budgets, budgetExceptions, hojeMk, vKey, monthIndex, catHistory]);
   const plannedTotal = useMemo(() => budgetRows.reduce((s, r) => s + r.limit, 0), [budgetRows]);
+  useBudgetAlerts({
+    rows: budgetRowsHoje,
+    mk: hojeMk,
+    ativo: loadStatus === "ok" && settings?.budgetAlerts !== false,
+    notificar: Boolean(settings?.budgetNotify)
+  });
   const alerts = budgetRows.filter(r => r.status === "over" || r.status === "warn");
   const byCatChart = useMemo(() => Object.entries(flowSpentByCat).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({
     name,
@@ -5332,7 +5424,8 @@ function App() {
     monthLabel,
     txs,
     view,
-    accounts
+    accounts,
+    budgetNotify: Boolean(settings?.budgetNotify)
   }), tab === "metas" && /*#__PURE__*/React.createElement(Metas, {
     goals,
     update,
@@ -5414,6 +5507,40 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", {
     className: "hint"
   }, "Preenchendo, os lançamentos passam a mostrar quantas horas de trabalho aquele valor representa. Deixe em R$ 0,00 para desligar."), /*#__PURE__*/React.createElement("div", {
+    className: "sheetdivider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 6
+    }
+  }, "Avisos"), /*#__PURE__*/React.createElement("label", {
+    className: "toggle"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: settings?.budgetAlerts !== false,
+    onChange: e => update(d => ({
+      settings: {
+        ...d.settings,
+        budgetAlerts: e.target.checked
+      }
+    }))
+  }), "Avisar quando uma categoria passar de 80% e de 100% do orçamento"), sb && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("label", {
+    className: "toggle"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: Boolean(settings?.emailSummary),
+    onChange: e => update(d => ({
+      settings: {
+        ...d.settings,
+        emailSummary: e.target.checked
+      }
+    }))
+  }), "Receber por e-mail o resumo do mês, todo dia 1"), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: -6
+    }
+  }, "Vai para ", session ? session.user.email : "o e-mail da sua conta", ": renda, despesas, resultado e as categorias que passaram do limite. Depende do envio de e-mails estar configurado no servidor (ver api/monthly-summary.js).")), /*#__PURE__*/React.createElement("div", {
     className: "sheetdivider"
   }), /*#__PURE__*/React.createElement("div", {
     className: "sub",
@@ -8590,11 +8717,9 @@ function Orcamento({
   monthLabel,
   txs,
   view,
-  accounts
+  accounts,
+  budgetNotify
 }) {
-  const [openCat, setOpenCat] = useState(null);
-  const [val, setVal] = useState(0);
-  const [scope, setScope] = useState("default"); // "default" (todos os meses) | "month" (exceção deste mês)
   const allCats = CATS.gasto.map(c => c[0]);
   const vKey = `${view.getFullYear()}-${String(view.getMonth() + 1).padStart(2, "0")}`;
   const setBudgetDefault = (c, cents) => {
@@ -8623,25 +8748,73 @@ function Orcamento({
       };
     });
   };
-  const activeCat = openCat || allCats[0];
-  const saveBudget = () => {
-    if (scope === "month") setBudgetException(activeCat, val);else setBudgetDefault(activeCat, val);
-    toast("Limite salvo.", "success");
-  };
-  const removeBudget = () => {
-    if (scope === "month") setBudgetException(activeCat, 0);else setBudgetDefault(activeCat, 0);
-    setVal(0);
-  };
-  const pickCategory = c => {
-    setOpenCat(c);
-    const hasExc = budgetExceptions[vKey]?.[c] != null;
-    setScope(hasExc ? "month" : "default");
-    setVal(hasExc ? budgetExceptions[vKey][c] : budgets[c] || 0);
-  };
-  const pickScope = s => {
-    setScope(s);
-    setVal(s === "month" ? budgetExceptions[vKey]?.[activeCat] || 0 : budgets[activeCat] || 0);
-  };
+  // "Editar orçamentos": todas as categorias de uma vez, valendo para todos os meses (padrão) ou só para o mês aberto
+  const [editando, setEditando] = useState(false);
+  const [escopo, setEscopo] = useState("default");
+  const [rascunho, setRascunho] = useState({});
+  const valoresDo = esc => Object.fromEntries(allCats.map(c => [c, esc === "month" ? (budgetExceptions[vKey] || {})[c] ?? (budgets[c] || 0) : budgets[c] || 0]));
+  function abrirEditor() {
+    setEscopo("default");
+    setRascunho(valoresDo("default"));
+    setEditando(true);
+  }
+  function trocarEscopo(esc) {
+    setEscopo(esc);
+    setRascunho(valoresDo(esc));
+  }
+  function salvarEditor() {
+    if (escopo === "default") {
+      update(d => {
+        const b = {
+          ...d.budgets
+        };
+        allCats.forEach(c => {
+          const v = rascunho[c] || 0;
+          if (v > 0) b[c] = v;else delete b[c];
+        });
+        return {
+          budgets: b
+        };
+      });
+    } else {
+      update(d => {
+        const mapa = {
+          ...((d.budgetExceptions || {})[vKey] || {})
+        };
+        allCats.forEach(c => {
+          const v = rascunho[c] || 0;
+          if (v === ((d.budgets || {})[c] || 0)) delete mapa[c];else mapa[c] = v;
+        });
+        const next = {
+          ...d.budgetExceptions
+        };
+        if (Object.keys(mapa).length) next[vKey] = mapa;else delete next[vKey];
+        return {
+          budgetExceptions: next
+        };
+      });
+    }
+    setEditando(false);
+    toast("Orçamentos salvos.", "success");
+  }
+  const [notifPerm, setNotifPerm] = useState(() => typeof window !== "undefined" && "Notification" in window ? Notification.permission : "unsupported");
+  async function ativarNotificacoes() {
+    try {
+      const r = await Notification.requestPermission();
+      setNotifPerm(r);
+      if (r === "granted") {
+        update(d => ({
+          settings: {
+            ...d.settings,
+            budgetNotify: true
+          }
+        }));
+        notificarAparelho("Alertas de orçamento ligados", "Você vai receber um aviso quando uma categoria passar de 80% do limite.", "orcamento-teste");
+      } else toast("Sem permissão, os avisos continuam aparecendo só na tela.", "default");
+    } catch (_) {
+      toast("Este navegador não deixou ativar as notificações.", "error");
+    }
+  }
 
   // mesma base do restante do orçamento: gasto conta no mês da fatura do cartão, não no mês da compra
   const prevSpentByCat = useMemo(() => {
@@ -8753,126 +8926,168 @@ function Orcamento({
     };
   }, [avgMonthly, avgByCat, simCat, simPct, simExtraType, simExtraValue]);
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "card g-6"
-  }, /*#__PURE__*/React.createElement("h3", null, "Orçamento de ", monthLabel, " ", /*#__PURE__*/React.createElement("span", {
+    className: "card g-12"
+  }, /*#__PURE__*/React.createElement("h3", null, /*#__PURE__*/React.createElement("span", null, "Orçamento de ", monthLabel, " ", /*#__PURE__*/React.createElement("span", {
     className: "num",
     style: {
       fontSize: 14,
       fontWeight: 500,
-      color: totalSpent > plannedTotal && plannedTotal > 0 ? "var(--neg)" : "var(--text)"
+      color: totalSpent > plannedTotal && plannedTotal > 0 ? "var(--neg)" : "var(--text-mut)"
     }
-  }, brl(totalSpent), " / ", brl(plannedTotal)), " ", /*#__PURE__*/React.createElement(HelpIcon, {
+  }, brl(totalSpent), " / ", brl(plannedTotal))), /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6
+    }
+  }, !editando && /*#__PURE__*/React.createElement("button", {
+    className: "sbtn",
+    onClick: abrirEditor
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "editar",
+    size: 14
+  }), " Editar orçamentos"), /*#__PURE__*/React.createElement(HelpIcon, {
     section: "orcamento-ajuda"
-  })), /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("div", {
     className: "sub"
-  }, "Defina quanto quer gastar em cada categoria. O histórico ajuda a ser realista. Gastos no cartão contam no mês da fatura, não no mês da compra."), budgetRows.length === 0 && /*#__PURE__*/React.createElement("p", {
+  }, "Os limites valem todo mês e o gasto recomeça do zero no dia 1 — cada mês é medido separado. Gastos no cartão contam no mês da fatura, não no mês da compra."), editando ? /*#__PURE__*/React.createElement("div", {
+    className: "budedit"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "seg",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: escopo === "default" ? "on in" : "",
+    onClick: () => trocarEscopo("default")
+  }, "Todos os meses"), /*#__PURE__*/React.createElement("button", {
+    className: escopo === "month" ? "on inv" : "",
+    onClick: () => trocarEscopo("month")
+  }, "Só ", monthLabel)), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: -4,
+      marginBottom: 10
+    }
+  }, escopo === "default" ? "Limite padrão de cada categoria. Deixe em R$ 0,00 para não ter limite." : `Limite só para ${monthLabel} (ex.: dezembro com presentes). O que ficar igual ao padrão não vira exceção.`), allCats.map(c => /*#__PURE__*/React.createElement("div", {
+    className: "budeditrow",
+    key: c
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "bname"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: CAT_ICON[c] || "outros",
+    size: 15
+  }), " ", c, CAT_HINT[c] && /*#__PURE__*/React.createElement("small", null, CAT_HINT[c])), /*#__PURE__*/React.createElement(Money, {
+    cents: rascunho[c] || 0,
+    onChange: v => setRascunho(m => ({
+      ...m,
+      [c]: v
+    })),
+    small: true
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "formactions",
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "sbtn",
+    onClick: () => setEditando(false)
+  }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
+    className: "submit",
+    onClick: salvarEditor
+  }, "Salvar orçamentos"))) : /*#__PURE__*/React.createElement(React.Fragment, null, budgetRows.length === 0 && /*#__PURE__*/React.createElement("p", {
     className: "hint"
-  }, "Nenhuma categoria com orçamento ou gasto ainda. Use o cartão \"Definir orçamento\" para escolher uma categoria e um limite — o histórico de quanto você costuma gastar aparece aqui assim que houver lançamentos."), budgetRows.map(r => {
+  }, "Nenhuma categoria com orçamento ou gasto ainda. Toque em \"Editar orçamentos\" para definir os limites — o histórico de quanto você costuma gastar aparece aqui assim que houver lançamentos."), budgetRows.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "budtable",
+    role: "table",
+    "aria-label": `Orçamento de ${monthLabel}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "budtr budth",
+    role: "row"
+  }, /*#__PURE__*/React.createElement("span", {
+    role: "columnheader"
+  }, "Categoria"), /*#__PURE__*/React.createElement("span", {
+    role: "columnheader"
+  }, "Orçado"), /*#__PURE__*/React.createElement("span", {
+    role: "columnheader"
+  }, "Gasto"), /*#__PURE__*/React.createElement("span", {
+    role: "columnheader"
+  }, "%"), /*#__PURE__*/React.createElement("span", {
+    role: "columnheader"
+  }, "Status")), budgetRows.map(r => {
     const rollover = r.limit > 0 ? r.limit - (prevSpentByCat[r.cat] || 0) : 0;
     return /*#__PURE__*/React.createElement("div", {
-      className: "budrow",
-      key: r.cat
+      className: "budtrwrap",
+      key: r.cat,
+      role: "rowgroup"
     }, /*#__PURE__*/React.createElement("div", {
-      className: "bh"
+      className: "budtr",
+      role: "row"
     }, /*#__PURE__*/React.createElement("span", {
-      className: "bname"
+      className: "bname",
+      role: "cell"
     }, /*#__PURE__*/React.createElement(Icon, {
       name: CAT_ICON[r.cat] || "outros",
       size: 15
-    }), " ", r.cat, r.status === "over" && /*#__PURE__*/React.createElement("span", {
-      className: "tag over"
-    }, "estourou"), r.status === "warn" && /*#__PURE__*/React.createElement("span", {
-      className: "tag warn"
-    }, "atenção"), r.status === "ok" && /*#__PURE__*/React.createElement("span", {
-      className: "tag ok"
-    }, "no limite")), /*#__PURE__*/React.createElement("span", {
-      className: "bval"
-    }, brl(r.spent), r.limit > 0 && /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: "var(--text-mut)"
-      }
-    }, " / ", brl(r.limit)))), /*#__PURE__*/React.createElement(ProgressBar, {
+    }), " ", r.cat), /*#__PURE__*/React.createElement("span", {
+      className: "num",
+      role: "cell",
+      "data-l": "Orçado"
+    }, r.limit > 0 ? brl(r.limit) : "—"), /*#__PURE__*/React.createElement("span", {
+      className: "num",
+      role: "cell",
+      "data-l": "Gasto"
+    }, brl(r.spent)), /*#__PURE__*/React.createElement("span", {
+      className: "num",
+      role: "cell",
+      "data-l": "%"
+    }, r.limit > 0 ? `${Math.round(r.pct * 100)}%` : "—"), /*#__PURE__*/React.createElement("span", {
+      role: "cell"
+    }, /*#__PURE__*/React.createElement(StatusDot, {
+      status: r.status
+    }))), /*#__PURE__*/React.createElement(ProgressBar, {
       spent: r.spent,
       limit: r.limit,
       status: r.status
     }), /*#__PURE__*/React.createElement("div", {
       className: "mm"
-    }, r.hist ? /*#__PURE__*/React.createElement(React.Fragment, null, "Histórico: mín ", brl(r.hist.min), " · média ", brl(r.hist.avg), " · máx ", brl(r.hist.max)) : "Sem histórico ainda", " · ", /*#__PURE__*/React.createElement("button", {
-      style: {
-        border: "none",
-        background: "none",
-        color: "var(--inv)",
-        cursor: "pointer",
-        fontSize: 11,
-        textDecoration: "underline",
-        padding: 0
-      },
-      onClick: () => pickCategory(r.cat)
-    }, r.limit > 0 ? "editar limite" : "definir limite")), r.isException && /*#__PURE__*/React.createElement("div", {
-      className: "mm",
+    }, r.hist ? /*#__PURE__*/React.createElement(React.Fragment, null, "Histórico: mín ", brl(r.hist.min), " · média ", brl(r.hist.avg), " · máx ", brl(r.hist.max)) : "Sem histórico ainda", r.isException && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", /*#__PURE__*/React.createElement("span", {
       style: {
         color: "var(--inv)"
       }
-    }, "Limite específico de ", monthLabel, " · ", /*#__PURE__*/React.createElement("button", {
-      style: {
-        border: "none",
-        background: "none",
-        color: "var(--inv)",
-        cursor: "pointer",
-        fontSize: 11,
-        textDecoration: "underline",
-        padding: 0
-      },
+    }, "limite específico de ", monthLabel), " · ", /*#__PURE__*/React.createElement("button", {
+      className: "linkbtn",
       onClick: () => setBudgetException(r.cat, 0)
-    }, "remover exceção")), rollover > 0 && /*#__PURE__*/React.createElement("div", {
+    }, "remover exceção"))), rollover > 0 && /*#__PURE__*/React.createElement("div", {
       className: "mm",
       style: {
         color: "var(--pos)"
       }
     }, "Sobrou ", brl(rollover), " do mês passado nesta categoria — dá para remanejar para este mês ou para investimentos."));
   })), /*#__PURE__*/React.createElement("div", {
-    className: "card g-6"
-  }, /*#__PURE__*/React.createElement("h3", null, "Definir orçamento"), /*#__PURE__*/React.createElement("div", {
-    className: "sub"
-  }, "Escolha a categoria, o valor e se vale só para ", monthLabel, " ou todos os meses (planejamento sazonal)."), /*#__PURE__*/React.createElement("select", {
-    className: "fld",
-    value: activeCat,
-    onChange: e => pickCategory(e.target.value),
-    style: {
-      marginBottom: 10
-    }
-  }, allCats.map(c => /*#__PURE__*/React.createElement("option", {
-    key: c,
-    value: c
-  }, c))), /*#__PURE__*/React.createElement("div", {
-    className: "seg",
-    style: {
-      marginBottom: 12
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: scope === "default" ? "on in" : "",
-    onClick: () => pickScope("default")
-  }, "Todos os meses"), /*#__PURE__*/React.createElement("button", {
-    className: scope === "month" ? "on inv" : "",
-    onClick: () => pickScope("month")
-  }, "Neste mês (", monthLabel, ")")), /*#__PURE__*/React.createElement(Money, {
-    cents: val,
-    onChange: setVal,
-    small: true,
-    onEnter: saveBudget
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      gap: 8,
-      marginTop: 10
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "sbtn primary",
-    onClick: saveBudget
-  }, "Salvar limite"), val > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "budalerts"
+  }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement(Icon, {
+    name: "alerta",
+    size: 14
+  }), " Alertas: aviso quando uma categoria passa de 80% e de 100% do limite."), typeof window !== "undefined" && "Notification" in window ? notifPerm === "granted" && budgetNotify ? /*#__PURE__*/React.createElement("button", {
+    className: "linkbtn",
+    onClick: () => update(d => ({
+      settings: {
+        ...d.settings,
+        budgetNotify: false
+      }
+    }))
+  }, "Notificações do aparelho ligadas · desligar") : notifPerm === "denied" ? /*#__PURE__*/React.createElement("span", {
+    className: "mm"
+  }, "Notificações bloqueadas no navegador — libere nas permissões do site para receber.") : /*#__PURE__*/React.createElement("button", {
     className: "sbtn",
-    onClick: removeBudget
-  }, "Remover"))), /*#__PURE__*/React.createElement("div", {
+    onClick: ativarNotificacoes
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "brilho",
+    size: 14
+  }), " Ativar notificações no aparelho") : /*#__PURE__*/React.createElement("span", {
+    className: "mm"
+  }, "Este navegador não oferece notificações; os avisos aparecem na tela.")))), /*#__PURE__*/React.createElement("div", {
     className: "card g-12"
   }, /*#__PURE__*/React.createElement("h3", null, "Comprometimento das próximas rendas"), /*#__PURE__*/React.createElement("div", {
     className: "sub",

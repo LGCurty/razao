@@ -2,7 +2,7 @@
 // instantâneo mesmo sem internet. NUNCA intercepta chamadas de dados (Supabase, /api/gemini,
 // pdf.js sob demanda): essas sempre vão direto pra rede, sem passar pelo cache — o app já resolve
 // "sem conexão" por conta própria (modo somente leitura com o último estado salvo, ver index.html).
-const CACHE_NAME = "razao-shell-v1.2.45";
+const CACHE_NAME = "razao-shell-v1.2.47";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -55,4 +55,14 @@ self.addEventListener("fetch", (event) => {
       return cached || network;
     })
   );
+});
+
+// toque numa notificação (ex.: alerta de orçamento): traz o app para a frente, ou abre se estiver fechado
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil((async () => {
+    const janelas = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const c of janelas) { if ("focus" in c) return c.focus(); }
+    if (self.clients.openWindow) return self.clients.openWindow("./");
+  })());
 });
