@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.38 · compilado em 2026-10-07T00:05:43.809Z */
+   Versão 1.2.41 · compilado em 2026-10-07T00:30:56.110Z */
 const {
   useState,
   useEffect,
@@ -22,7 +22,7 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.38";
+const APP_VERSION = "1.2.41";
 const APP_BUILD = "2026-10-07";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -1172,6 +1172,15 @@ const ICONS = {
     x2: "20",
     y2: "20"
   })),
+  sincronizar: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+    d: "M20 11 A8 8 0 0 0 6.3 6.3 L4 8.5"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M4 4 V8.5 H8.5"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M4 13 A8 8 0 0 0 17.7 17.7 L20 15.5"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M20 20 V15.5 H15.5"
+  })),
   config: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("circle", {
     cx: "12",
     cy: "12",
@@ -1951,6 +1960,7 @@ function mapPluggyDocs({
         // lançamento ainda não efetivado no banco pode mudar de valor ou sumir: marcar com confiança
         // baixa faz a etiqueta "conferir" aparecer na revisão
         confidence: String(t.status || "").toUpperCase() === "PENDING" ? 0.4 : null,
+        pendente: String(t.status || "").toUpperCase() === "PENDING",
         selected: true
       });
     });
@@ -1995,6 +2005,128 @@ function mapPluggyDocs({
     ignorados
   };
 }
+
+/* janela de busca de uma conexão: desde a última sincronização (com folga de 5 dias, porque o banco
+   às vezes efetiva um lançamento com data retroativa), no mínimo 7 dias; primeira vez, 90 dias */
+function diasDesdeUltimaSync(conexao) {
+  return conexao?.lastSyncAt ? Math.max(7, Math.ceil((Date.now() - new Date(conexao.lastSyncAt).getTime()) / 86400000) + 5) : 90;
+}
+
+/* núcleo da sincronização de UMA conexão do Open Finance, sem mexer no estado do app: confere o status
+   da conexão, lista as contas e busca os lançamentos no Pluggy, e devolve tudo já convertido. Quem chama
+   decide o destino — a tela "Importar do banco" manda para a revisão; a sincronização automática grava
+   direto. Erro de conexão que pede ação da pessoa (senha trocada, consentimento vencido) volta com
+   err.reconectar=true, para não ficar tentando de novo à toa. */
+async function syncPluggyConnection({
+  conexao,
+  accounts,
+  categoryMemory,
+  jaImportados,
+  dias,
+  onEtapa
+}) {
+  const etapa = onEtapa || (() => {});
+  etapa(`Falando com o ${conexao.connectorName}…`, 0.06);
+  const info = await pluggyApi("item", {
+    itemId: conexao.id
+  });
+  const status = String(info.status || "").toUpperCase();
+  const st = PLUGGY_ITEM_STATUS[status];
+  if (st && st.reconectar) {
+    const e = new Error(st.label);
+    e.reconectar = true;
+    e.itemStatus = status;
+    throw e;
+  }
+  const aviso = st && !st.ok ? st.label : "";
+  etapa("Listando as contas…", 0.15);
+  const {
+    results: contas = []
+  } = await pluggyApi("accounts", {
+    itemId: conexao.id
+  });
+  if (contas.length === 0) {
+    const e = new Error("O banco não devolveu nenhuma conta nesta conexão.");
+    e.itemStatus = status;
+    throw e;
+  }
+  // conta/cartão que a conexão traz e ainda não existe aqui é criado na hora (ver garantirContasPluggy)
+  const {
+    accounts: accountsComNovas,
+    novas
+  } = garantirContasPluggy(contas, accounts, conexao.connectorName);
+  const hoje = new Date();
+  const ini = new Date(hoje.getTime() - (dias || diasDesdeUltimaSync(conexao)) * 86400000);
+  const from = new Date(ini.getTime() - ini.getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+    to = todayISO();
+  const txPorConta = {};
+  for (let i = 0; i < contas.length; i++) {
+    const c = contas[i];
+    etapa(`Buscando os lançamentos de ${c.name || "conta"}…`, 0.2 + 0.75 * (i / contas.length));
+    // a paginação por cursor do Pluggy acontece dentro de api/pluggy.js: aqui volta a lista inteira
+    const r = await pluggyApi("transactions", {
+      accountId: c.id,
+      from,
+      to
+    });
+    txPorConta[c.id] = r.results || [];
+  }
+  etapa("Organizando os lançamentos…", 0.97);
+  const {
+    docs,
+    rows,
+    ignorados
+  } = mapPluggyDocs({
+    contas,
+    txPorConta,
+    accounts: accountsComNovas,
+    categoryMemory,
+    jaImportados,
+    criadasAgora: new Set(novas.map(a => a.id)),
+    conexao: {
+      id: conexao.id,
+      connectorName: conexao.connectorName
+    }
+  });
+  // saldo informado pelo próprio banco, por conta do app: é o que a Home usa como "saldo total" das contas
+  // conectadas (o saldo calculado só pelos lançamentos importados não enxerga o que veio antes da janela)
+  const saldos = {};
+  contas.forEach(c => {
+    const m = matchPluggyAccount(c, accountsComNovas);
+    if (m && m.id && pluggyKind(c) === "conta" && typeof c.balance === "number") saldos[m.id] = Math.round(c.balance * 100);
+  });
+  return {
+    status,
+    aviso,
+    contas,
+    novas,
+    accountsComNovas,
+    docs,
+    rows,
+    ignorados,
+    saldos
+  };
+}
+
+/* linha de revisão (mesmo formato da leitura de PDF) → lançamento do app, como a revisão faz ao aprovar.
+   Só entra o que está completo: conta definida e, em transferência, destino diferente da origem. */
+function pluggyRowToTx(it) {
+  const base = {
+    id: uid(),
+    type: it.type,
+    cents: it.cents,
+    category: it.type === "transferencia" ? "" : it.category,
+    description: it.desc,
+    date: it.date,
+    acctId: it.acctId,
+    status: it.date > todayISO() ? "previsto" : "realizado",
+    source: "pluggy_sync"
+  };
+  if (it.type === "transferencia") base.toAcctId = it.toAcctId;
+  if (it.pluggyId) base.pluggyId = it.pluggyId;
+  return base;
+}
+const pluggyRowCompleta = it => it.acctId && it.cents > 0 && (it.type !== "transferencia" || it.toAcctId && it.toAcctId !== it.acctId);
 const SEED = {
   schemaVersion: 5,
   theme: "dark",
@@ -2026,7 +2158,8 @@ const SEED = {
   settings: {
     hourlyWageCents: 0,
     aiModel: "rapido",
-    colorTheme: "aco"
+    colorTheme: "aco",
+    pluggyReview: false
   }
 };
 const SCHEMA_VERSION = 5;
@@ -2083,10 +2216,12 @@ function migrate(data) {
   // 4.0 — preço em horas de trabalho (opcional): 0 = recurso desligado, não aparece em lugar nenhum
   // 4.1 — escolha do motor de IA usada na leitura de documentos ("rapido" | "cuidadoso")
   // 4.2 — cor de marca escolhível (Configurações > Personalização); "aco" é o padrão de fábrica
+  // 6.0 — Open Finance: "revisar antes de salvar" desligado = sincroniza sozinho e grava direto
   d.settings = {
     hourlyWageCents: 0,
     aiModel: "rapido",
     colorTheme: "aco",
+    pluggyReview: false,
     ...(d.settings || {})
   };
   if (!AI_MODELS[d.settings.aiModel]) d.settings.aiModel = "rapido";
@@ -2237,6 +2372,38 @@ const TYPES = {
 };
 // previsto × realizado: sem o campo (dado pré-migração) sempre foi tratado como já ocorrido.
 // totais, históricos e gráficos usam só o realizado; a lista mostra os dois, o previsto atenuado.
+/* método de pagamento de um movimento: o campo paymentMethod (preenchido no formulário); lançamentos
+   antigos, sem o campo, mostram o que dá para deduzir da conta (cartão → crédito) */
+const PAYMENT_METHODS = {
+  pix: {
+    label: "Pix"
+  },
+  credito: {
+    label: "Cartão de crédito"
+  },
+  debito: {
+    label: "Cartão de débito"
+  },
+  dinheiro: {
+    label: "Dinheiro"
+  },
+  boleto: {
+    label: "Boleto"
+  },
+  deposito: {
+    label: "Depósito"
+  },
+  ted: {
+    label: "Transferência (TED/DOC)"
+  }
+};
+function paymentLabel(t, accounts) {
+  if (t.paymentMethod && PAYMENT_METHODS[t.paymentMethod]) return PAYMENT_METHODS[t.paymentMethod].label;
+  if (t.type === "transferencia") return "Transferência";
+  const a = (accounts || []).find(x => x.id === t.acctId);
+  if (a && a.kind === "cartao") return "Cartão de crédito";
+  return "—";
+}
 const isRealized = t => (t.status || "realizado") !== "previsto";
 const CATS = {
   gasto: [["Alimentação", "alimentacao"], ["Transporte", "transporte"], ["Moradia", "moradia"], ["Contas", "contas-cat"], ["Saúde", "saude"], ["Lazer", "lazer"], ["Compras", "compras"], ["Educação", "educacao"], ["Assinaturas", "assinaturas"], ["Pets", "pets"], ["Outros", "outros"]],
@@ -3655,6 +3822,256 @@ function RecoverySetPassword({
 }
 
 /* =========================== APP =========================== */
+/* ---- sincronização automática do Open Finance (Pluggy) ----
+   Roda enquanto o app está aberto e logado: ao abrir, e a cada 5 minutos confere quais conexões
+   passaram de 6h sem atualizar e busca só essas, em sequência. Falha de rede ou do banco ganha nova
+   tentativa depois de 5 minutos, no máximo 3 seguidas — depois disso espera a próxima janela de 6h
+   (ou um clique em "tentar de novo"). Conexão que exige ação da pessoa (senha trocada, consentimento
+   vencido) não é tentada de novo sozinha: aparece como "reconectar". Sem internet, espera o "online".
+   O que chega é gravado direto, sem duplicar (o id do lançamento no Pluggy é a chave). Lançamento ainda
+   PENDENTE no banco fica para depois: pode mudar de valor ou sumir antes de ser efetivado.
+   Com o app fechado nada roda — isso exigiria um agendamento no servidor com chave privilegiada. */
+const AUTO_SYNC_HORAS = 6;
+const AUTO_SYNC_RETRY_MIN = 5;
+const AUTO_SYNC_MAX_TENTATIVAS = 3;
+function usePluggyAutoSync({
+  ativo,
+  data,
+  update
+}) {
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const updateRef = useRef(update);
+  updateRef.current = update;
+  const [configurado, setConfigurado] = useState(null);
+  const [estado, setEstado] = useState({}); // itemId -> { fase:"sincronizando"|"ok"|"erro"|"reconectar", erro, em, novos }
+  const [rodando, setRodando] = useState(false);
+  const rodandoRef = useRef(false);
+  const falhas = useRef({}); // itemId -> { n, em } (falhas seguidas e quando foi a última)
+
+  useEffect(() => {
+    if (!ativo) return;
+    let cancelado = false;
+    pluggyApi("status").then(r => {
+      if (!cancelado) setConfigurado(Boolean(r.configurado));
+    }).catch(() => {
+      if (!cancelado) setConfigurado(false);
+    });
+    return () => {
+      cancelado = true;
+    };
+  }, [ativo]);
+  async function sincronizarUma(conexao, opts) {
+    setEstado(s => ({
+      ...s,
+      [conexao.id]: {
+        ...(s[conexao.id] || {}),
+        fase: "sincronizando",
+        erro: ""
+      }
+    }));
+    const d = dataRef.current;
+    const jaImportados = new Set((d.transactions || []).filter(t => t.pluggyId).map(t => t.pluggyId));
+    try {
+      const r = await syncPluggyConnection({
+        conexao,
+        accounts: d.accounts,
+        categoryMemory: d.categoryMemory,
+        jaImportados,
+        dias: opts && opts.dias
+      });
+      const prontos = r.rows.filter(it => pluggyRowCompleta(it) && !it.pendente).map(pluggyRowToTx);
+      // quantos realmente entram (a gravação abaixo ainda filtra pelo estado mais recente)
+      const conhecidosAgora = new Set((dataRef.current.transactions || []).filter(t => t.pluggyId).map(t => t.pluggyId));
+      const gravados = prontos.filter(t => !t.pluggyId || !conhecidosAgora.has(t.pluggyId)).length;
+      const agora = new Date().toISOString();
+      updateRef.current(dd => {
+        const conhecidos = new Set(dd.transactions.filter(t => t.pluggyId).map(t => t.pluggyId));
+        const add = prontos.filter(t => !t.pluggyId || !conhecidos.has(t.pluggyId));
+        const contasNovas = r.novas.filter(a => !dd.accounts.some(x => x.id === a.id));
+        const accounts = [...dd.accounts, ...contasNovas].map(a => r.saldos[a.id] !== undefined ? {
+          ...a,
+          bankBalance: r.saldos[a.id],
+          bankBalanceAt: agora
+        } : a);
+        return {
+          transactions: [...add, ...dd.transactions],
+          accounts,
+          pluggy: {
+            ...dd.pluggy,
+            items: dd.pluggy.items.map(i => i.id === conexao.id ? {
+              ...i,
+              lastSyncAt: agora,
+              lastStatus: r.status,
+              contas: r.contas.length,
+              lastError: ""
+            } : i)
+          }
+        };
+      });
+      falhas.current[conexao.id] = {
+        n: 0,
+        em: 0
+      };
+      setEstado(s => ({
+        ...s,
+        [conexao.id]: {
+          fase: "ok",
+          erro: r.aviso || "",
+          em: Date.now(),
+          novos: gravados
+        }
+      }));
+      return {
+        ok: true,
+        novos: gravados,
+        contasNovas: r.novas
+      };
+    } catch (err) {
+      const f = falhas.current[conexao.id] || {
+        n: 0,
+        em: 0
+      };
+      falhas.current[conexao.id] = {
+        n: f.n + 1,
+        em: Date.now()
+      };
+      const reconectar = Boolean(err.reconectar);
+      // só grava na conexão (e portanto no banco de dados) o que pede ação: reconectar, ou a última tentativa
+      if (reconectar || f.n + 1 >= AUTO_SYNC_MAX_TENTATIVAS) {
+        updateRef.current(dd => ({
+          pluggy: {
+            ...dd.pluggy,
+            items: dd.pluggy.items.map(i => i.id === conexao.id ? {
+              ...i,
+              lastStatus: err.itemStatus || i.lastStatus,
+              lastError: err.message || "Falha ao sincronizar."
+            } : i)
+          }
+        }));
+      }
+      setEstado(s => ({
+        ...s,
+        [conexao.id]: {
+          fase: reconectar ? "reconectar" : "erro",
+          erro: err.message || "Não foi possível buscar os dados do banco.",
+          em: Date.now(),
+          tentativas: f.n + 1
+        }
+      }));
+      return {
+        ok: false,
+        erro: err.message,
+        reconectar
+      };
+    }
+  }
+  async function rodar(lista, manual, opts) {
+    if (rodandoRef.current || lista.length === 0) return {
+      ok: true,
+      novos: 0
+    };
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      if (manual) toast("Sem conexão com a internet — a sincronização roda assim que ela voltar.", "error");
+      return {
+        ok: false,
+        erro: "Sem conexão com a internet."
+      };
+    }
+    rodandoRef.current = true;
+    setRodando(true);
+    let novos = 0;
+    const erros = [],
+      contas = [];
+    try {
+      for (const c of lista) {
+        const r = await sincronizarUma(c, opts);
+        if (r.ok) {
+          novos += r.novos;
+          contas.push(...(r.contasNovas || []));
+        } else erros.push(`${c.connectorName}: ${r.erro}`);
+      }
+    } finally {
+      rodandoRef.current = false;
+      setRodando(false);
+    }
+    if (contas.length) toast(`${contas.length === 1 ? "Conta criada" : "Contas criadas"} automaticamente: ${contas.map(a => a.name).join(", ")}.`, "success");
+    if (novos > 0) toast(`${novos} lançamento${novos === 1 ? " novo" : "s novos"} do banco ${novos === 1 ? "salvo" : "salvos"}.`, "success");else if (manual && erros.length === 0) toast("Tudo em dia: nenhum lançamento novo nos bancos.", "default");
+    return erros.length ? {
+      ok: false,
+      erro: erros.join(" · "),
+      novos
+    } : {
+      ok: true,
+      novos
+    };
+  }
+
+  // conexões "vencidas" (6h+ sem atualizar) e liberadas para tentar agora, respeitando a espera entre tentativas
+  function elegiveis() {
+    const agora = Date.now();
+    return (dataRef.current.pluggy?.items || []).filter(c => {
+      const st = PLUGGY_ITEM_STATUS[String(c.lastStatus || "").toUpperCase()];
+      if (st && st.reconectar) return false; // espera a pessoa reconectar
+      const velha = !c.lastSyncAt || agora - new Date(c.lastSyncAt).getTime() >= AUTO_SYNC_HORAS * 3600000;
+      if (!velha) return false;
+      const f = falhas.current[c.id];
+      if (!f || f.n === 0) return true;
+      if (f.n < AUTO_SYNC_MAX_TENTATIVAS) return agora - f.em >= AUTO_SYNC_RETRY_MIN * 60000;
+      return agora - f.em >= AUTO_SYNC_HORAS * 3600000;
+    });
+  }
+  useEffect(() => {
+    if (!ativo || configurado !== true) return;
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      const v = elegiveis();
+      if (v.length) rodar(v, false);
+    };
+    const t0 = setTimeout(tick, 1500); // um respiro depois de abrir: deixa o app terminar de carregar
+    const iv = setInterval(tick, AUTO_SYNC_RETRY_MIN * 60000);
+    const onOnline = () => setTimeout(tick, 1000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearTimeout(t0);
+      clearInterval(iv);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [ativo, configurado]);
+  const items = data && data.pluggy && data.pluggy.items || [];
+  const ultimaSync = items.reduce((m, i) => i.lastSyncAt && (!m || i.lastSyncAt > m) ? i.lastSyncAt : m, "");
+  return {
+    configurado,
+    ativo: Boolean(ativo && configurado),
+    rodando,
+    estado,
+    ultimaSync,
+    // manual: zera as falhas e roda já (uma conexão, ou todas)
+    sincronizarAgora: (itemId, opts) => {
+      const lista = items.filter(i => !itemId || i.id === itemId);
+      lista.forEach(i => {
+        falhas.current[i.id] = {
+          n: 0,
+          em: 0
+        };
+      });
+      if (!ativo) return Promise.resolve({
+        ok: false,
+        erro: !sb ? "Entre com a sua conta para sincronizar com o banco." : "Sincronização indisponível agora."
+      });
+      if (configurado === false) return Promise.resolve({
+        ok: false,
+        erro: "Open Finance ainda não configurado no servidor."
+      });
+      return rodar(lista, true, opts);
+    }
+  };
+}
 function App() {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!sb); // sem supabase, pula auth
@@ -3793,6 +4210,8 @@ function App() {
   const fileRef = useRef(null);
   const saveTimer = useRef(null);
   const retryTimer = useRef(null);
+  const saveInFlightRef = useRef(false); // um salvamento está a caminho do servidor agora
+  const skipNextSaveRef = useRef(false); // os dados acabaram de VIR do servidor: não há o que salvar de volta
   const lastKnownUpdatedAtRef = useRef(null);
   const dirtyRef = useRef(false); // há alteração ainda não confirmada como salva (para o aviso de beforeunload)
   const [offlineReadOnly, setOfflineReadOnly] = useState(false); // sem conexão: abre com o último estado salvo, sem gravar nada
@@ -3910,6 +4329,7 @@ function App() {
 
   // salvar (debounce) com detecção de conflito entre dispositivos e nova tentativa automática em caso de falha
   async function attemptSave(userId, dataToSave, retryDelay) {
+    saveInFlightRef.current = true;
     try {
       const result = await saveData(userId, dataToSave, lastKnownUpdatedAtRef.current);
       if (result.conflict) {
@@ -3939,6 +4359,8 @@ function App() {
       const nextDelay = retryDelay >= 15000 ? 15000 : retryDelay === 5000 ? 15000 : retryDelay === 2000 ? 5000 : 2000;
       clearTimeout(retryTimer.current);
       retryTimer.current = setTimeout(() => attemptSave(userId, dataToSave, nextDelay), retryDelay || 2000);
+    } finally {
+      saveInFlightRef.current = false;
     }
   }
   function retrySaveNow() {
@@ -3947,6 +4369,12 @@ function App() {
   }
   useEffect(() => {
     if (loadStatus !== "ok" || offlineReadOnly) return; // somente leitura offline: nunca tenta gravar
+    // recém-recarregado do servidor (tempo real ou "recarregar"): gravar de volta o mesmo conteúdo só
+    // geraria um carimbo novo — e, com dois aparelhos abertos, um empurrando o outro sem fim
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
     dirtyRef.current = true;
     setSaveState("saving");
     clearTimeout(saveTimer.current);
@@ -3984,6 +4412,67 @@ function App() {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [session, loadStatus]);
+
+  /* tempo real (Supabase Realtime): quando outro aparelho salva, este recarrega sozinho se não tiver nada
+     pendente aqui; se tiver, cai no mesmo diálogo de conflito de sempre. O evento só serve de "campainha":
+     quem decide é o carimbo canônico do servidor (fetchServerUpdatedAt), o que também descarta o eco do
+     próprio salvamento. Precisa da tabela finance_data publicada no Realtime (ver supabase/migrations);
+     sem isso a assinatura não recebe nada e o app segue com a checagem ao voltar o foco, como antes. */
+  useEffect(() => {
+    if (!sb || !session || loadStatus !== "ok" || typeof sb.channel !== "function") return;
+    const userId = session.user.id;
+    let timer = null,
+      vivo = true;
+    function verificar() {
+      fetchServerUpdatedAt(userId).then(serverTs => {
+        if (!vivo || !serverTs) return;
+        if (lastKnownUpdatedAtRef.current && sameInstant(serverTs, lastKnownUpdatedAtRef.current)) return;
+        if (saveInFlightRef.current) {
+          timer = setTimeout(verificar, 2500);
+          return;
+        } // espera o salvamento daqui terminar
+        if (dirtyRef.current) {
+          setConflict({
+            message: "Seus dados acabaram de ser alterados em outro dispositivo."
+          });
+          return;
+        }
+        loadData(userId).then(({
+          data: fresh,
+          updatedAt
+        }) => {
+          if (!vivo || dirtyRef.current) return;
+          skipNextSaveRef.current = true;
+          setData(fresh);
+          lastKnownUpdatedAtRef.current = updatedAt;
+          toast("Atualizado com as mudanças feitas em outro dispositivo.", "default");
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+    let canal = null;
+    try {
+      canal = sb.channel("finance_data:" + userId).on("postgres_changes", {
+        event: "UPDATE",
+        schema: "public",
+        table: "finance_data",
+        filter: "user_id=eq." + userId
+      }, () => {
+        clearTimeout(timer);
+        timer = setTimeout(verificar, 800);
+      }).subscribe();
+    } catch (_) {
+      canal = null;
+    }
+    return () => {
+      vivo = false;
+      clearTimeout(timer);
+      if (canal) {
+        try {
+          sb.removeChannel(canal);
+        } catch (_) {}
+      }
+    };
+  }, [session, loadStatus]);
   async function reloadFromServer() {
     const userId = session ? session.user.id : null;
     try {
@@ -3991,6 +4480,7 @@ function App() {
         data: freshData,
         updatedAt
       } = await loadData(userId);
+      skipNextSaveRef.current = true;
       setData(freshData);
       lastKnownUpdatedAtRef.current = updatedAt;
       dirtyRef.current = false;
@@ -4027,6 +4517,13 @@ function App() {
       ...(typeof patch === "function" ? patch(d) : patch)
     }));
   };
+  // Open Finance automático: só com login (o servidor exige), dados carregados, online e sem a
+  // preferência "revisar antes de salvar" ligada (nesse caso a busca fica manual, pela revisão)
+  const pluggySync = usePluggyAutoSync({
+    ativo: Boolean(sb && session && loadStatus === "ok" && !offlineReadOnly && !(data && data.settings && data.settings.pluggyReview)),
+    data,
+    update
+  });
   const vKey = `${view.getFullYear()}-${String(view.getMonth() + 1).padStart(2, "0")}`;
   // índice único por mês (mês da fatura, respeitando txEffectiveMonth): uma única passada por todos os
   // lançamentos alimenta entradas/saídas/investido/proventos/categoria (só o realizado) de cada mês, mais
@@ -4491,7 +4988,20 @@ function App() {
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "brilho",
     size: 14
-  }), " Atualizar agora")), tab === "geral" && /*#__PURE__*/React.createElement(Geral, {
+  }), " Atualizar agora")), tab === "geral" && /*#__PURE__*/React.createElement(HomeDashboard, {
+    txs,
+    accounts,
+    monthIndex,
+    vKey,
+    monthLabel,
+    totals,
+    budgetRows,
+    pluggy,
+    pluggySync,
+    session
+  }), tab === "geral" && /*#__PURE__*/React.createElement("div", {
+    className: "sectionhead"
+  }, "Panorama completo"), tab === "geral" && /*#__PURE__*/React.createElement(Geral, {
     txs,
     accounts,
     holdings,
@@ -4555,7 +5065,9 @@ function App() {
     txs,
     aiModel: settings?.aiModel || "rapido",
     pluggy,
-    categoryMemory
+    categoryMemory,
+    autoSync: pluggySync,
+    revisarAntes: settings?.pluggyReview
   }), tab === "perguntar" && /*#__PURE__*/React.createElement(Perguntar, {
     txs,
     accounts
@@ -4616,6 +5128,29 @@ function App() {
   }), /*#__PURE__*/React.createElement("div", {
     className: "hint"
   }, "Preenchendo, os lançamentos passam a mostrar quantas horas de trabalho aquele valor representa. Deixe em R$ 0,00 para desligar."), /*#__PURE__*/React.createElement("div", {
+    className: "sheetdivider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 6
+    }
+  }, "Open Finance (bancos conectados)"), /*#__PURE__*/React.createElement("label", {
+    className: "toggle"
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: Boolean(settings?.pluggyReview),
+    onChange: e => update(d => ({
+      settings: {
+        ...d.settings,
+        pluggyReview: e.target.checked
+      }
+    }))
+  }), "Revisar os lançamentos do banco antes de salvar"), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: -6
+    }
+  }, settings?.pluggyReview ? "Ligado: a sincronização fica manual (em Gastos › Importar do banco) e tudo passa pela lista de revisão antes de entrar." : "Desligado (padrão): o app sincroniza sozinho ao abrir e a cada 6 horas enquanto estiver aberto, e grava direto, sem duplicar. Lançamentos ainda pendentes no banco entram quando forem efetivados."), /*#__PURE__*/React.createElement("div", {
     className: "sheetdivider"
   }), /*#__PURE__*/React.createElement("div", {
     className: "sub",
@@ -6700,6 +7235,255 @@ function BcbIndicators() {
     className: "vv"
   }, state.data.ipca12m.toFixed(2).replace(".", ","), "%"))));
 }
+
+/* ================================================================================
+   HOME — o que importa de relance: saldo total, o mês em números, o orçamento mais apertado e os
+   últimos movimentos. O Panorama completo (patrimônio, evolução, indicadores…) continua logo abaixo.
+   ================================================================================ */
+// "há 3 min", "há 2 h", "há 4 dias" — para dizer quando foi a última sincronização
+function tempoDesde(iso) {
+  if (!iso) return "";
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "agora";
+  if (s < 3600) return `há ${Math.round(s / 60)} min`;
+  if (s < 86400) return `há ${Math.round(s / 3600)} h`;
+  const d = Math.round(s / 86400);
+  return `há ${d} dia${d === 1 ? "" : "s"}`;
+}
+// saldo de cada conta pelo que foi lançado (mesma regra do Panorama: transferência é par débito/crédito,
+// só o realizado conta, soma o saldo inicial). Conta ligada ao banco usa o saldo informado pelo banco.
+function saldosPorConta(txs, accounts) {
+  const m = {};
+  txs.filter(isRealized).forEach(t => {
+    if (t.type === "transferencia") {
+      m[t.acctId] = (m[t.acctId] || 0) - t.cents;
+      m[t.toAcctId] = (m[t.toAcctId] || 0) + t.cents;
+    } else m[t.acctId] = (m[t.acctId] || 0) + t.cents * TYPES[t.type].sign;
+  });
+  return accounts.map(a => {
+    const calculado = (m[a.id] || 0) + (a.openingBalance || 0);
+    const doBanco = a.kind === "conta" && typeof a.bankBalance === "number";
+    return {
+      ...a,
+      calculado,
+      saldo: doBanco ? a.bankBalance : calculado,
+      doBanco
+    };
+  });
+}
+function StatusDot({
+  status
+}) {
+  const cor = status === "over" ? "var(--neg)" : status === "warn" ? "var(--warn)" : status === "ok" ? "var(--pos)" : "var(--text-mut)";
+  const rotulo = status === "over" ? "Limite atingido" : status === "warn" ? "Atenção" : status === "ok" ? "OK" : "Sem limite";
+  return /*#__PURE__*/React.createElement("span", {
+    className: "statusdot",
+    title: rotulo
+  }, /*#__PURE__*/React.createElement("i", {
+    style: {
+      background: cor
+    }
+  }), /*#__PURE__*/React.createElement("span", null, rotulo));
+}
+function HomeDashboard({
+  txs,
+  accounts,
+  monthIndex,
+  vKey,
+  monthLabel,
+  totals,
+  budgetRows,
+  pluggy,
+  pluggySync,
+  session
+}) {
+  const contas = useMemo(() => saldosPorConta(txs, accounts), [txs, accounts]);
+  const soContas = contas.filter(a => a.kind === "conta");
+  const saldoTotal = soContas.reduce((s, a) => s + a.saldo, 0);
+  const bucket = monthIndex[vKey] || {
+    itens: []
+  };
+  const faturas = contas.filter(a => a.kind === "cartao").map(a => ({
+    a,
+    v: cardInvoiceNet(bucket.itens, a.id).net
+  })).filter(x => x.v > 0);
+  const conexoes = pluggy && pluggy.items || [];
+  const estado = pluggySync && pluggySync.estado || {};
+  const comErro = conexoes.filter(c => {
+    const e = estado[c.id];
+    return e && (e.fase === "erro" || e.fase === "reconectar") || c.lastError;
+  });
+  const ultima = pluggySync && pluggySync.ultimaSync;
+  const nome = session ? String(session.user.email || "").split("@")[0] : "";
+  const resultado = totals.inc - totals.exp;
+  const comLimite = budgetRows.filter(r => r.limit > 0).sort((a, b) => b.pct - a.pct).slice(0, 3);
+  const semLimite = comLimite.length ? [] : budgetRows.filter(r => r.spent > 0).sort((a, b) => b.spent - a.spent).slice(0, 3);
+  const recentes = useMemo(() => [...txs].filter(isRealized).sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : String(b.id).localeCompare(String(a.id))).slice(0, 5), [txs]);
+  const nomeConta = id => {
+    const a = accounts.find(x => x.id === id);
+    return a ? a.bank && a.bank !== "Outro" ? `${a.bank}` : a.name : "—";
+  };
+  async function sincronizar() {
+    if (!pluggySync) return;
+    const r = await pluggySync.sincronizarAgora();
+    if (r && !r.ok && r.erro) toast(r.erro, "error");
+  }
+  const podeSincronizar = pluggySync && pluggySync.ativo && conexoes.length > 0;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "homehead"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "eyebrow"
+  }, nome ? `Olá, ${nome}` : "Olá"), /*#__PURE__*/React.createElement("h2", {
+    className: "hometitle"
+  }, "Seu dinheiro hoje")), podeSincronizar ? /*#__PURE__*/React.createElement("button", {
+    className: "syncbtn" + (pluggySync.rodando ? " spin" : "") + (comErro.length ? " err" : ""),
+    onClick: sincronizar,
+    disabled: pluggySync.rodando,
+    "aria-label": "Sincronizar com os bancos",
+    title: ultima ? `Última sincronização ${tempoDesde(ultima)}` : "Sincronizar com os bancos"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "sincronizar",
+    size: 16
+  }), /*#__PURE__*/React.createElement("span", null, pluggySync.rodando ? "Sincronizando…" : comErro.length ? "Erro na sincronização" : ultima ? `Atualizado ${tempoDesde(ultima)}` : "Sincronizar")) : /*#__PURE__*/React.createElement("button", {
+    className: "syncbtn",
+    onClick: () => goToTab("extrato")
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "banco",
+    size: 16
+  }), /*#__PURE__*/React.createElement("span", null, "Conectar banco"))), /*#__PURE__*/React.createElement("div", {
+    className: "card g-6 homecard"
+  }, /*#__PURE__*/React.createElement("h3", null, "Saldo total ", /*#__PURE__*/React.createElement(HelpIcon, {
+    section: "contas-cartoes"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "bal num " + (saldoTotal >= 0 ? "pos" : "neg"),
+    style: {
+      fontSize: 30,
+      margin: "4px 0 6px"
+    }
+  }, brl(saldoTotal)), /*#__PURE__*/React.createElement("div", {
+    className: "mm"
+  }, "Soma das ", soContas.length, " conta", soContas.length === 1 ? "" : "s", " (sem cartões)", soContas.some(a => a.doBanco) ? " · saldo informado pelo banco nas contas conectadas" : ""), faturas.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mm"
+  }, "Fatura de cartão em ", monthLabel, ": ", faturas.map(f => `${f.a.name} ${brl(f.v)}`).join(" · ")), /*#__PURE__*/React.createElement("div", {
+    className: "homemeta"
+  }, conexoes.length > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement(Icon, {
+    name: "banco",
+    size: 13
+  }), " ", conexoes.length, " banco", conexoes.length === 1 ? "" : "s", " conectado", conexoes.length === 1 ? "" : "s", " (", conexoes.map(c => c.connectorName).join(", "), ")"), ultima && /*#__PURE__*/React.createElement("span", null, "Última sincronização: ", tempoDesde(ultima)), comErro.length > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--neg)"
+    }
+  }, comErro.map(c => c.connectorName).join(", "), ": precisa de atenção em Configurações › Contas e bancos")) : /*#__PURE__*/React.createElement("span", null, "Nenhum banco conectado — os saldos vêm do que você lança."))), /*#__PURE__*/React.createElement("div", {
+    className: "card g-6 homecard"
+  }, /*#__PURE__*/React.createElement("h3", null, monthLabel, " em números"), /*#__PURE__*/React.createElement("div", {
+    className: "kv"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "kk"
+  }, "Renda"), /*#__PURE__*/React.createElement("span", {
+    className: "vv num",
+    style: {
+      color: "var(--pos)"
+    }
+  }, brl(totals.inc))), /*#__PURE__*/React.createElement("div", {
+    className: "kv"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "kk"
+  }, "Despesas"), /*#__PURE__*/React.createElement("span", {
+    className: "vv num",
+    style: {
+      color: "var(--neg)"
+    }
+  }, brl(totals.exp))), /*#__PURE__*/React.createElement("div", {
+    className: "kv"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "kk"
+  }, /*#__PURE__*/React.createElement("b", null, "Resultado")), /*#__PURE__*/React.createElement("span", {
+    className: "vv num",
+    style: {
+      fontSize: 18,
+      fontWeight: 600,
+      color: resultado >= 0 ? "var(--pos)" : "var(--neg)"
+    }
+  }, brl(resultado))), totals.inv > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mm"
+  }, "Investido no mês: ", brl(totals.inv), " (fora do resultado)")), /*#__PURE__*/React.createElement("div", {
+    className: "card g-6 homecard"
+  }, /*#__PURE__*/React.createElement("h3", null, "Orçamento: as 3 mais apertadas ", /*#__PURE__*/React.createElement(HelpIcon, {
+    section: "orcamento-ajuda"
+  })), comLimite.length === 0 && semLimite.length === 0 && /*#__PURE__*/React.createElement("p", {
+    className: "hint"
+  }, "Nenhuma despesa em ", monthLabel, " ainda."), comLimite.map(r => /*#__PURE__*/React.createElement("div", {
+    className: "homebud",
+    key: r.cat
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bh"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "bname"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: CAT_ICON[r.cat] || "outros",
+    size: 15
+  }), " ", r.cat), /*#__PURE__*/React.createElement("span", {
+    className: "bval num"
+  }, brl(r.spent), " ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--text-mut)"
+    }
+  }, "/ ", brl(r.limit), " (", Math.round(r.pct * 100), "%)"))), /*#__PURE__*/React.createElement(ProgressBar, {
+    spent: r.spent,
+    limit: r.limit,
+    status: r.status
+  }), /*#__PURE__*/React.createElement(StatusDot, {
+    status: r.status
+  }))), semLimite.length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, semLimite.map(r => /*#__PURE__*/React.createElement("div", {
+    className: "kv",
+    key: r.cat
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "kk"
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: CAT_ICON[r.cat] || "outros",
+    size: 14
+  }), " ", r.cat), /*#__PURE__*/React.createElement("span", {
+    className: "vv num"
+  }, brl(r.spent)))), /*#__PURE__*/React.createElement("p", {
+    className: "hint"
+  }, "Sem limites definidos ainda. ", /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "saveretry",
+    style: {
+      fontSize: "inherit"
+    },
+    onClick: () => goToTab("orcamento")
+  }, "Definir orçamento")))), /*#__PURE__*/React.createElement("div", {
+    className: "card g-6 homecard"
+  }, /*#__PURE__*/React.createElement("h3", null, "Histórico recente ", /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "sbtn",
+    onClick: () => goToTab("balanco")
+  }, "Ver todos")), recentes.length === 0 && /*#__PURE__*/React.createElement("p", {
+    className: "hint"
+  }, "Nenhum movimento registrado ainda. Use \"Novo movimento\" para começar."), /*#__PURE__*/React.createElement("div", {
+    className: "recentlist"
+  }, recentes.map(t => {
+    const sinal = TYPES[t.type].sign;
+    const cor = t.type === "ganho" ? "var(--pos)" : t.type === "gasto" ? "var(--neg)" : t.type === "investimento" ? "var(--inv)" : "var(--trf)";
+    return /*#__PURE__*/React.createElement("div", {
+      className: "recentrow",
+      key: t.id
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "rdate num"
+    }, t.date.slice(8, 10), "/", t.date.slice(5, 7)), /*#__PURE__*/React.createElement("span", {
+      className: "rcat"
+    }, t.type === "transferencia" ? "Transferência" : t.category || TYPES[t.type].label, /*#__PURE__*/React.createElement("small", null, t.description || "")), /*#__PURE__*/React.createElement("span", {
+      className: "rval num",
+      style: {
+        color: cor
+      }
+    }, sinal > 0 ? "+" : sinal < 0 ? "−" : "↔", " ", brlNum(t.cents)), /*#__PURE__*/React.createElement("span", {
+      className: "rmeta"
+    }, paymentLabel(t, accounts), " · ", nomeConta(t.acctId)));
+  }))));
+}
+HomeDashboard = React.memo(HomeDashboard);
 
 /* ---------- PANORAMA GERAL (consolidado de todos os meses e todas as contas) ---------- */
 function Geral({
@@ -9351,7 +10135,9 @@ function OpenFinance({
   pluggy,
   categoryMemory,
   jaImportados,
-  onResultado
+  onResultado,
+  autoSync,
+  revisarAntes
 }) {
   const conexoes = pluggy?.items || [];
   const [configurado, setConfigurado] = useState(null); // null = ainda perguntando ao servidor
@@ -9385,136 +10171,69 @@ function OpenFinance({
   // recusa — melhor dizer isso antes da pessoa clicar do que deixar o erro aparecer depois
   const podeConectar = configurado === true && logado;
 
-  /* abrir esta aba já atualiza sozinha qualquer conexão "velha" (mais de 20h sem sincronizar), sem
-     precisar clicar em nada — não existe como o app rodar sozinho com a aba fechada (isso pediria um
-     agendamento no servidor, com uma chave de acesso bem mais privilegiada, e passaria por cima da
-     revisão manual). O resultado continua caindo na mesma lista de revisão de sempre. */
-  const autoSincronizouRef = useRef(false);
-  useEffect(() => {
-    if (autoSincronizouRef.current || !podeConectar || conexoes.length === 0 || busy) return;
-    const precisam = conexoes.filter(c => !c.lastSyncAt || (Date.now() - new Date(c.lastSyncAt).getTime()) / 3600000 >= 20);
-    if (precisam.length === 0) return;
-    autoSincronizouRef.current = true; // marca já, antes do atraso: evita disparar de novo enquanto espera
-    // uma conexão que acabou de nascer (lastSyncAt vazio) pode ainda estar com o banco terminando de
-    // mandar os dados para o Pluggy — um respiro curto evita um "o banco não devolveu nenhuma conta" falso
-    const t = setTimeout(() => {
-      (async () => {
-        for (const c of precisam) {
-          if (!vivo.current) return;
-          await sincronizar(c);
-        }
-      })();
-    }, 1200);
-    return () => clearTimeout(t);
-  }, [podeConectar, conexoes.length, busy]);
-  function desdeQuando(conexao) {
-    const hoje = new Date();
-    const dias = periodo === "auto" ? conexao?.lastSyncAt ? Math.max(7, Math.ceil((hoje - new Date(conexao.lastSyncAt)) / 86400000) + 5) : 90 : Number(periodo);
-    const d = new Date(hoje.getTime() - dias * 86400000);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  }
-  async function buscarLancamentos(accountId, from, to) {
-    // a paginação por cursor do Pluggy (GET /v2/transactions) acontece dentro de api/pluggy.js — aqui
-    // é só uma chamada, que já volta com a lista inteira do período
-    const r = await pluggyApi("transactions", {
-      accountId,
-      from,
-      to
-    });
-    return r.results || [];
-  }
+  /* a sincronização automática (ao abrir o app e a cada 6h, com novas tentativas) roda no nível do app
+     — ver usePluggyAutoSync. Esta tela só dispara na mão. Com "revisar antes de salvar" ligado em
+     Preferências, o resultado vem para a lista de revisão daqui, como sempre foi; desligado (padrão),
+     a busca manual usa o mesmo caminho da automática e já grava direto. */
+  const revisar = Boolean(revisarAntes);
+  const dias = conexao => periodo === "auto" ? diasDesdeUltimaSync(conexao) : Number(periodo);
   async function sincronizar(conexao) {
     if (busy) return;
+    if (!revisar && autoSync) {
+      setErro("");
+      setBusy(conexao.id);
+      setEtapa({
+        label: `Sincronizando ${conexao.connectorName}…`,
+        pct: 0.5
+      });
+      try {
+        const r = await autoSync.sincronizarAgora(conexao.id, {
+          dias: dias(conexao)
+        });
+        if (r && !r.ok && vivo.current) setErro(r.erro || "Não foi possível buscar os dados do banco.");
+      } finally {
+        if (vivo.current) {
+          setBusy("");
+          setEtapa({
+            label: "",
+            pct: 0
+          });
+        }
+      }
+      return;
+    }
     setErro("");
     setBusy(conexao.id);
-    setEtapa({
-      label: `Falando com o ${conexao.connectorName}…`,
-      pct: 0.06
-    });
     try {
-      const info = await pluggyApi("item", {
-        itemId: conexao.id
-      });
-      const status = String(info.status || "").toUpperCase();
-      const st = PLUGGY_ITEM_STATUS[status];
-      if (st && st.reconectar) {
-        update(d => ({
-          pluggy: {
-            ...d.pluggy,
-            items: d.pluggy.items.map(i => i.id === conexao.id ? {
-              ...i,
-              lastStatus: status
-            } : i)
-          }
-        }));
-        throw new Error(st.label);
-      }
-      const aviso = st && !st.ok ? st.label : "";
-      setEtapa({
-        label: "Listando as contas…",
-        pct: 0.15
-      });
-      const {
-        results: contas = []
-      } = await pluggyApi("accounts", {
-        itemId: conexao.id
-      });
-      if (contas.length === 0) throw new Error("O banco não devolveu nenhuma conta nesta conexão.");
-
-      // conta/cartão que essa conexão precisa e ainda não existe (nem por número, nem por nome) é
-      // criado aqui, sozinho — sem isso, a pessoa teria que cadastrar cada conta na mão antes de
-      // importar, o que contradiz a ideia de "conectar e pronto" do Open Finance
-      const {
-        accounts: accountsComNovas,
-        novas
-      } = garantirContasPluggy(contas, accounts, conexao.connectorName);
-      if (novas.length) {
-        update(d => ({
-          accounts: [...d.accounts, ...novas]
-        }));
-        toast(`${novas.length === 1 ? "Conta criada" : "Contas criadas"} automaticamente: ${novas.map(a => a.name).join(", ")}.`, "success");
-      }
-      const from = desdeQuando(conexao),
-        to = todayISO();
-      const txPorConta = {};
-      for (let i = 0; i < contas.length; i++) {
-        const c = contas[i];
-        setEtapa({
-          label: `Buscando os lançamentos de ${c.name || "conta"}…`,
-          pct: 0.2 + 0.75 * (i / contas.length)
-        });
-        txPorConta[c.id] = await buscarLancamentos(c.id, from, to);
-      }
-      if (!vivo.current) return;
-      setEtapa({
-        label: "Organizando os lançamentos…",
-        pct: 0.97
-      });
-      const {
-        docs,
-        rows,
-        ignorados
-      } = mapPluggyDocs({
-        contas,
-        txPorConta,
-        accounts: accountsComNovas,
+      const r = await syncPluggyConnection({
+        conexao,
+        accounts,
         categoryMemory,
         jaImportados,
-        criadasAgora: new Set(novas.map(a => a.id)),
-        conexao: {
-          id: conexao.id,
-          connectorName: conexao.connectorName
+        dias: dias(conexao),
+        onEtapa: (label, pct) => {
+          if (vivo.current) setEtapa({
+            label,
+            pct
+          });
         }
       });
-      const jaEstavam = ignorados > 0 ? ` ${ignorados} já ${ignorados === 1 ? "tinha sido importado" : "tinham sido importados"} antes.` : "";
-      if (rows.length === 0) {
+      if (!vivo.current) return;
+      if (r.novas.length) {
+        update(d => ({
+          accounts: [...d.accounts, ...r.novas.filter(a => !d.accounts.some(x => x.id === a.id))]
+        }));
+        toast(`${r.novas.length === 1 ? "Conta criada" : "Contas criadas"} automaticamente: ${r.novas.map(a => a.name).join(", ")}.`, "success");
+      }
+      const jaEstavam = r.ignorados > 0 ? ` ${r.ignorados} já ${r.ignorados === 1 ? "tinha sido importado" : "tinham sido importados"} antes.` : "";
+      if (r.rows.length === 0) {
         toast(`Nenhum lançamento novo no ${conexao.connectorName} nesse período.${jaEstavam}`, "default");
       } else {
         onResultado({
-          docs,
-          rows
+          docs: r.docs,
+          rows: r.rows
         });
-        toast(`${rows.length} lançamento${rows.length === 1 ? "" : "s"} do ${conexao.connectorName} para revisar.${jaEstavam}`, "success");
+        toast(`${r.rows.length} lançamento${r.rows.length === 1 ? "" : "s"} do ${conexao.connectorName} para revisar.${jaEstavam}`, "success");
       }
       update(d => ({
         pluggy: {
@@ -9522,13 +10241,23 @@ function OpenFinance({
           items: d.pluggy.items.map(i => i.id === conexao.id ? {
             ...i,
             lastSyncAt: new Date().toISOString(),
-            lastStatus: status,
-            contas: contas.length
+            lastStatus: r.status,
+            contas: r.contas.length,
+            lastError: ""
           } : i)
         }
       }));
-      if (aviso) setErro(aviso);
+      if (r.aviso) setErro(r.aviso);
     } catch (err) {
+      if (err.reconectar) update(d => ({
+        pluggy: {
+          ...d.pluggy,
+          items: d.pluggy.items.map(i => i.id === conexao.id ? {
+            ...i,
+            lastStatus: err.itemStatus || i.lastStatus
+          } : i)
+        }
+      }));
       if (vivo.current) setErro(err.message || "Não foi possível buscar os dados do banco.");
     } finally {
       if (vivo.current) {
@@ -9909,7 +10638,9 @@ function Extrato({
   txs,
   aiModel,
   pluggy,
-  categoryMemory
+  categoryMemory,
+  autoSync,
+  revisarAntes
 }) {
   const [docs, setDocs] = useState([]); // um por arquivo enviado, com status e progresso próprios
   const [items, setItems] = useState([]); // lançamentos reconhecidos, cada um apontando para o docId de origem
@@ -10267,17 +10998,23 @@ function Extrato({
       if (!conta || !keys.length) return;
       aprendidos[conta] = [...(aprendidos[conta] || []), ...keys];
     });
-    update(d => ({
-      transactions: [...entries, ...d.transactions],
-      categoryMemory: {
-        ...(d.categoryMemory || {}),
-        ...memoria
-      },
-      accounts: Object.keys(aprendidos).length ? d.accounts.map(a => aprendidos[a.id] ? {
-        ...a,
-        matchKeys: [...new Set([...(a.matchKeys || []), ...aprendidos[a.id]])]
-      } : a) : d.accounts
-    }));
+    update(d => {
+      // a sincronização automática pode ter gravado o mesmo lançamento do banco enquanto esta lista
+      // esperava revisão — o id do Pluggy decide, na hora de gravar, o que ainda não existe
+      const conhecidos = new Set(d.transactions.filter(t => t.pluggyId).map(t => t.pluggyId));
+      const novos = entries.filter(t => !t.pluggyId || !conhecidos.has(t.pluggyId));
+      return {
+        transactions: [...novos, ...d.transactions],
+        categoryMemory: {
+          ...(d.categoryMemory || {}),
+          ...memoria
+        },
+        accounts: Object.keys(aprendidos).length ? d.accounts.map(a => aprendidos[a.id] ? {
+          ...a,
+          matchKeys: [...new Set([...(a.matchKeys || []), ...aprendidos[a.id]])]
+        } : a) : d.accounts
+      };
+    });
     const ids = new Set(lista.map(it => it.id));
     setItems(its => its.filter(it => !ids.has(it.id)));
     toast(`${entries.length} lançamento${entries.length === 1 ? "" : "s"} importado${entries.length === 1 ? "" : "s"}.`, "success");
@@ -10351,7 +11088,9 @@ function Extrato({
     pluggy: pluggy,
     categoryMemory: categoryMemory,
     jaImportados: pluggyIdsSalvos,
-    onResultado: receberDoOpenFinance
+    onResultado: receberDoOpenFinance,
+    autoSync: autoSync,
+    revisarAntes: revisarAntes
   }), /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
