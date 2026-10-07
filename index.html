@@ -169,8 +169,7 @@ body{background:#08090D}
   /* mesma proporção 6:6 usada em todo o resto do app pra par de caixas lado a lado (.g-6) — o Balanço
      era a única aba com um split assimétrico (5:7) aqui, e por isso a linha entre as duas colunas
      "pulava" de posição ao trocar de aba pela barra lateral. */
-  .rz .dashtop>.hero{grid-column:span 6}
-  .rz .dashtop>.add{display:block;grid-column:span 6;margin-bottom:0}
+  .rz .dashtop>.hero{grid-column:span 12}
 }
 .rz .banner{background:var(--warn-bg);color:var(--warn);border-radius:11px;padding:10px 13px;font-size:12px;margin-bottom:16px;line-height:1.5;grid-column:1/-1}
 .rz .banner.upd{background:var(--accent-bg);color:var(--accent);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -574,7 +573,24 @@ body{background:#08090D}
   .rz .authform{flex:1}
 }
 
+/* ===================== sub-telas de cada seção ===================== */
+.rz .subnav{display:flex;gap:6px;flex-wrap:wrap;grid-column:1/-1}
+.rz .subnav button{border:1px solid var(--hairline);background:var(--surface);color:var(--text-mut);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;min-height:36px}
+.rz .subnav button:hover{color:var(--text);border-color:var(--accent)}
+.rz .subnav button.on{background:var(--accent-bg);color:var(--accent);border-color:transparent;font-weight:600}
+.rz .iconbtn.on{color:var(--accent)}
+/* telas muito estreitas: o topo não cabe marca + mês + tema + configurações; o tema continua em Configurações › Preferências */
+@media (max-width:379px){.rz .themetoggle{display:none}}
+
 /* ===================== bottom nav / fab ===================== */
+.rz .fabfloat{display:none}
+@media (min-width:1024px){
+  .rz .fabfloat{display:inline-flex;align-items:center;gap:8px;position:fixed;right:28px;bottom:28px;z-index:45;border:none;border-radius:999px;
+    padding:14px 20px 14px 16px;background:var(--grad-accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;
+    box-shadow:0 14px 32px -10px color-mix(in srgb, var(--accent) 55%, transparent);transition:transform .12s,box-shadow .12s}
+  .rz .fabfloat:hover{transform:translateY(-1px)}
+  .rz .wrap{padding-bottom:110px}
+}
 .rz .bottomnav{display:none}
 @media (max-width:1023px){
   .rz .bottomnav{
@@ -610,8 +626,8 @@ const { useState, useEffect, useMemo, useRef, useId } = React;
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.35";
-const APP_BUILD = "2026-08-24";
+const APP_VERSION = "1.2.38";
+const APP_BUILD = "2026-10-07";
 
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
@@ -1726,28 +1742,18 @@ const COLOR_THEMES = [
 ];
 const COLOR_THEME_MAP = Object.fromEntries(COLOR_THEMES.map(t=>[t.id,t]));
 
-const TAB_GROUPS = [
-  { label:"Principal", items:[
-    ["geral","Panorama","panorama"],
-    ["balanco","Balanço","calendario"],
-    ["extrato","Importar do banco","extrato"],
-  ]},
-  { label:"Planejamento", items:[
-    ["orcamento","Orçamento","orcamento"],
-    ["metas","Metas","metas"],
-    ["investimentos","Investimentos","investimentos"],
-  ]},
-  { label:"Ferramentas", items:[
-    ["perguntar","Assistente","assistente"],
-  ]},
-  { label:"Configurações", items:[
-    ["contas","Contas","contas"],
-  ]},
-  { label:"Suporte", items:[
-    ["ajuda","Ajuda","ajuda"],
-  ]},
+/* navegação: 5 seções no menu principal (barra lateral no computador, barra inferior no celular). Cada
+   seção agrupa uma ou mais telas — as abas antigas — trocadas por um seletor no topo da seção. Nada foi
+   removido, só reagrupado. As chaves das telas ("geral", "balanco"…) continuam as mesmas, então
+   goToTab()/openHelp() e os links internos seguem funcionando sem mudança. */
+const NAV_SECTIONS = [
+  { key:"home", label:"Home", icon:"panorama", views:[["geral","Resumo"],["perguntar","Assistente"]] },
+  { key:"gastos", label:"Gastos", icon:"calendario", views:[["balanco","Lançamentos"],["extrato","Importar do banco"]] },
+  { key:"orcamento", label:"Orçamento", icon:"orcamento", views:[["orcamento","Orçamento"]] },
+  { key:"investimentos", label:"Investimentos", icon:"investimentos", views:[["investimentos","Carteira"],["metas","Metas"]] },
+  { key:"config", label:"Configurações", icon:"config", views:[["contas","Contas e bancos"],["preferencias","Preferências"],["ajuda","Ajuda"]] },
 ];
-const MORE_TABS = TAB_GROUPS.flatMap(g=>g.items).filter(([k])=>!["geral","balanco","orcamento"].includes(k));
+const sectionOfView = (v)=>NAV_SECTIONS.find(sec=>sec.views.some(([k])=>k===v))||NAV_SECTIONS[0];
 
 /* hook simples de breakpoint: só usado onde o comportamento (não só o visual) muda entre mobile e desktop */
 function useIsDesktop(){
@@ -2310,13 +2316,18 @@ function App(){
   const loaded = loadStatus==="ok"; // compat: usado pelas abas como "dados prontos"
 
   const [view,setView]=useState(new Date());
-  const [tab,setTab]=useState("balanco");
+  const [tab,setTab]=useState("geral");
+  // última tela vista em cada seção: voltar pra "Gastos" reabre "Importar do banco" se era lá que a pessoa estava
+  const [lastView,setLastView]=useState({});
+  useEffect(()=>{ const sec=sectionOfView(tab); setLastView(m=>m[sec.key]===tab?m:{...m,[sec.key]:tab}); },[tab]);
+  const curSection=sectionOfView(tab);
+  const goSection=(sec)=>setTab(lastView[sec.key]||sec.views[0][0]);
   const [helpTarget,setHelpTarget]=useState(null);
   // filtro pendente pra aplicar assim que a aba de destino abrir (ver goToTab) — ex: clicar numa
   // categoria no Panorama chega no Balanço já com aquela categoria filtrada na lista
   const [pendingFilter,setPendingFilter]=useState(null);
   useEffect(()=>{ helpListener=(sectionId)=>{ setHelpTarget(sectionId); setTab("ajuda"); }; return ()=>{ helpListener=null; }; },[]);
-  useEffect(()=>{ tabListener=(t,filter)=>{ setTab(t); setMoreOpen(false); if(filter) setPendingFilter(filter); }; return ()=>{ tabListener=null; }; },[]);
+  useEffect(()=>{ tabListener=(t,filter)=>{ setTab(t); if(filter) setPendingFilter(filter); }; return ()=>{ tabListener=null; }; },[]);
   // popover do mês e menu "⋯" são mutuamente exclusivos por construção (só um valor guardado);
   // setMonthPicker/setMenu abaixo são compatíveis com o uso anterior (booleano ou função de toggle)
   const [activePopover,setActivePopover]=useState(null); // "month" | "menu" | null
@@ -2348,8 +2359,6 @@ function App(){
       document.removeEventListener("keydown", onKeyDown);
     };
   },[activePopover]);
-  const [moreOpen,setMoreOpen]=useState(false);
-  const [settingsOpen,setSettingsOpen]=useState(false);
   // aviso de versão nova: quem chama é o registro do service worker (no fim do arquivo), assim que
   // termina de baixar um build mais recente. Nada recarrega sozinho — a decisão é de quem está usando,
   // pra não perder o que estiver sendo digitado no meio de um lançamento.
@@ -2368,6 +2377,7 @@ function App(){
   const [sheetEditTx,setSheetEditTx]=useState(null);
   const [sheetPropagateIds,setSheetPropagateIds]=useState([]);
   const fabRef=useRef(null);
+  const fabDeskRef=useRef(null);
   function openAdd(){ setSheetEditTx(null); setSheetPropagateIds([]); setSheetOpen(true); }
   function openEditMobile(t,propagateIds){ setSheetEditTx(t); setSheetPropagateIds(propagateIds||[]); setSheetOpen(true); }
 
@@ -2657,7 +2667,6 @@ function App(){
   function resetFinanceiro(){
     update(d=>({ transactions:[], accounts:[] }));
     setResetConfirmText("");
-    setSettingsOpen(false);
     toast("Transações, contas e cartões apagados. Se você usa Open Finance, a próxima sincronização recria as contas sozinha.","success");
   }
   function importData(e){
@@ -2675,7 +2684,7 @@ function App(){
       });
       setImportMode("merge"); setReplaceConfirmText("");
     };
-    r.readAsText(f); setMenu(false); setMoreOpen(false);
+    r.readAsText(f); setMenu(false);
     e.target.value="";
   }
   function applyImport(){
@@ -2767,20 +2776,9 @@ function App(){
                 <span>{saveState==="saving"?"Salvando…":saveState==="saved"?"Salvo":"Falha ao salvar"}</span>
                 {saveState==="erro" && <button className="saveretry" onClick={retrySaveNow}>Tentar de novo</button>}
               </span>}
-            <button className="iconbtn" aria-label="Alternar tema" onClick={()=>update(d=>({theme:d.theme==="dark"?"light":"dark"}))}><Icon name={theme==="dark"?"sol":"lua"} size={17}/></button>
-            <div className="menu">
-              <button className="iconbtn" ref={menuTriggerRef} aria-label="Menu" aria-expanded={menu} onClick={()=>setMenu(m=>!m)}><Icon name="mais" size={17}/></button>
-              {menu &&
-                <div className="menupop" ref={menuPopRef}>
-                  {session && <div className="who">{session.user.email}</div>}
-                  <button onClick={()=>{setSettingsOpen(true);setMenu(false);}}><Icon name="config" size={16}/> Configurações</button>
-                  <button onClick={()=>exportData()}><Icon name="baixar" size={16}/> Exportar backup (.json)</button>
-                  <button onClick={exportCSV}><Icon name="baixar" size={16}/> Exportar dados (.csv)</button>
-                  <button onClick={()=>fileRef.current?.click()}><Icon name="enviar" size={16}/> Importar backup</button>
-                  {sb && <button onClick={signOut}><Icon name="sair" size={16}/> Sair da conta</button>}
-                </div>}
-              <input ref={fileRef} type="file" accept="application/json" style={{display:"none"}} onChange={importData}/>
-            </div>
+            <button className="iconbtn themetoggle" aria-label="Alternar tema" onClick={()=>update(d=>({theme:d.theme==="dark"?"light":"dark"}))}><Icon name={theme==="dark"?"sol":"lua"} size={17}/></button>
+            <button className={"iconbtn"+(curSection.key==="config"?" on":"")} aria-label="Configurações" onClick={()=>setTab("preferencias")}><Icon name="config" size={17}/></button>
+            <input ref={fileRef} type="file" accept="application/json" style={{display:"none"}} onChange={importData}/>
           </div>
         </div>
       </div>
@@ -2788,14 +2786,15 @@ function App(){
       <div className="wrap">
         <div className="shell">
           <nav className="sidebar" aria-label="Navegação principal">
-            {TAB_GROUPS.map((g,gi)=>
-              <div className="navgroup" key={gi}>
-                <div className="navgrouplabel">{g.label}</div>
-                {g.items.map(([k,l,ic])=>
-                  <button key={k} className={"navitem"+(tab===k?" on":"")} data-tip={l} aria-current={tab===k?"page":undefined} onClick={()=>setTab(k)}>
-                    <span className="navic"><Icon name={ic} size={18}/></span><span className="navlbl">{l}</span>
-                  </button>)}
-              </div>)}
+            <div className="navgroup">
+              {NAV_SECTIONS.map(sec=>{
+                const on=curSection.key===sec.key;
+                return (
+                  <button key={sec.key} className={"navitem"+(on?" on":"")} data-tip={sec.label} aria-current={on?"page":undefined} onClick={()=>goSection(sec)}>
+                    <span className="navic"><Icon name={sec.icon} size={18}/></span><span className="navlbl">{sec.label}</span>
+                  </button>);
+              })}
+            </div>
             <div className="navfooter">
               <span className="navavatar">{session?session.user.email[0].toUpperCase():<Icon name="contas" size={14}/>}</span>
               <span className="navlbl2">
@@ -2807,6 +2806,11 @@ function App(){
           </nav>
 
           <div className="tabcontent">
+            {curSection.views.length>1 &&
+              <div className="subnav" role="tablist" aria-label={curSection.label}>
+                {curSection.views.map(([k,l])=>
+                  <button key={k} role="tab" aria-selected={tab===k} className={tab===k?"on":""} onClick={()=>setTab(k)}>{l}</button>)}
+              </div>}
             {!sb && <div className="banner">Modo local: os dados ficam só neste aparelho. Configure o Supabase no início do arquivo para ter login e sincronização entre dispositivos.</div>}
             {offlineReadOnly && <div className="banner err">Sem conexão — mostrando a última versão salva. Alterações não serão gravadas até a conexão voltar.</div>}
             {novaVersao &&
@@ -2823,79 +2827,92 @@ function App(){
             {tab==="perguntar" && <Perguntar {...{txs,accounts}}/>}
             {tab==="contas" && <Contas {...{accounts,update,monthTx:monthItens,txs}}/>}
             {tab==="ajuda" && <Ajuda helpTarget={helpTarget} onConsumeTarget={()=>setHelpTarget(null)}/>}
+            {tab==="preferencias" &&
+              <div className="card prefs">
+                <h3>Preferências</h3>
+                <div className="sub">Aparência, dados e conta. Contas e bancos ficam na tela ao lado.</div>
+                <div className="sub" style={{marginBottom:6}}>Tema</div>
+                <div className="seg" style={{marginBottom:6}}>
+                  <button className={theme!=="dark"?"on in":""} onClick={()=>update({theme:"light"})}><Icon name="sol" size={14}/> Claro</button>
+                  <button className={theme==="dark"?"on in":""} onClick={()=>update({theme:"dark"})}><Icon name="lua" size={14}/> Escuro</button>
+                </div>
+                <div className="sheetdivider"/>
+            <div className="sub" style={{marginBottom:6}}>Valor da sua hora de trabalho (opcional)</div>
+            <Money cents={settings?.hourlyWageCents||0} onChange={v=>update(d=>({settings:{...d.settings,hourlyWageCents:v}}))} small/>
+            <div className="hint">Preenchendo, os lançamentos passam a mostrar quantas horas de trabalho aquele valor representa. Deixe em R$ 0,00 para desligar.</div>
+            <div className="sheetdivider"/>
+            <div className="sub" style={{marginBottom:6}}>Motor de IA usado para ler extratos e faturas</div>
+            <div className="seg" style={{marginBottom:6}}>
+              {Object.entries(AI_MODELS).map(([k,m])=>
+                <button key={k} className={(settings?.aiModel||"rapido")===k?"on in":""} onClick={()=>update(d=>({settings:{...d.settings,aiModel:k}}))}>{m.label}</button>)}
+            </div>
+            <div className="hint">{AI_MODELS[settings?.aiModel||"rapido"].hint} Se um documento vier bagunçado ou com muitas linhas erradas, troque para "Cuidadoso" e mande de novo só aquele arquivo.</div>
+            <div className="sheetdivider"/>
+            <div className="sub" style={{marginBottom:8}}>Cor de marca do site</div>
+            <div className="colorgrid">
+              {COLOR_THEMES.map(t=>{
+                const active=(settings?.colorTheme||"aco")===t.id;
+                const swatch = theme==="dark" ? t.dark.accent : t.light.accent;
+                return (
+                  <button key={t.id} type="button" className={"colorswatch"+(active?" on":"")}
+                    style={{"--sw":swatch}} title={t.name} aria-label={"Usar cor "+t.name} aria-pressed={active}
+                    onClick={()=>update(d=>({settings:{...d.settings,colorTheme:t.id}}))}>
+                    {active && <Icon name="check" size={14}/>}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="hint">{COLOR_THEME_MAP[settings?.colorTheme||"aco"].name} — usada em botões, navegação ativa e destaques. As cores de ganho, gasto, investimento e aviso não mudam com a escolha aqui.</div>
+            <div className="sheetdivider"/>
+            <div className="kv"><span className="kk">Versão do app</span><span className="vv">{APP_VERSION}</span></div>
+            <div className="kv"><span className="kk">Atualizado em</span><span className="vv">{fmtDateBR(APP_BUILD)}</span></div>
+            {novaVersao
+              ? <button className="sbtn primary" style={{marginTop:10}} onClick={()=>window.location.reload()}><Icon name="brilho" size={14}/> Instalar a versão nova</button>
+              : <div className="hint">Você está na versão mais recente que este aparelho baixou. Quando sair uma nova, um aviso aparece aqui e no topo da tela.</div>}
+            <div className="sheetdivider"/>
+            <div className="sub" style={{marginBottom:6,color:"var(--neg)"}}>Zona de risco</div>
+            <div className="hint" style={{marginTop:0}}>
+              Apaga todas as transações, contas e cartões cadastrados — útil para começar do zero depois de ligar o Open Finance, sem lançamento de teste misturado com o que chega automático do banco.
+              As conexões do Open Finance continuam vinculadas (não precisa reconectar no Pluggy), e metas, orçamentos e categorização aprendida não são afetados.
+              Isso não pode ser desfeito por aqui — vale <button type="button" className="saveretry" style={{fontSize:"inherit"}} onClick={()=>exportData()}>exportar um backup</button> antes.
+            </div>
+            <input className="fld" value={resetConfirmText} onChange={e=>setResetConfirmText(e.target.value)} placeholder='Digite "apagar"' style={{margin:"10px 0 4px"}}/>
+            <button className="sbtn danger" style={{marginTop:6}} disabled={resetConfirmText.trim().toLowerCase()!=="apagar"} onClick={resetFinanceiro}>
+              <Icon name="excluir" size={14}/> Apagar transações, contas e cartões
+            </button>
+                <div className="sheetdivider"/>
+                <div className="sub" style={{marginBottom:8}}>Backup dos dados</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button className="sbtn" onClick={()=>exportData()}><Icon name="baixar" size={14}/> Exportar backup (.json)</button>
+                  <button className="sbtn" onClick={exportCSV}><Icon name="baixar" size={14}/> Exportar dados (.csv)</button>
+                  <button className="sbtn" onClick={()=>fileRef.current?.click()}><Icon name="enviar" size={14}/> Importar backup</button>
+                </div>
+                {sb &&
+                  <React.Fragment>
+                    <div className="sheetdivider"/>
+                    <div className="sub" style={{marginBottom:8}}>Conta</div>
+                    {session && <div className="kv"><span className="kk">Conectado como</span><span className="vv" style={{wordBreak:"break-all"}}>{session.user.email}</span></div>}
+                    <button className="sbtn danger" style={{marginTop:10}} onClick={signOut}><Icon name="sair" size={14}/> Sair da conta</button>
+                  </React.Fragment>}
+              </div>}
           </div>
         </div>
       </div>
 
       <nav className="bottomnav" aria-label="Navegação">
-        <button className={tab==="geral"?"on":""} onClick={()=>setTab("geral")} aria-label="Panorama"><Icon name="panorama" size={20}/><span>Panorama</span></button>
-        <button className={tab==="balanco"?"on":""} onClick={()=>setTab("balanco")} aria-label="Balanço"><Icon name="calendario" size={20}/><span>Balanço</span></button>
-        <button className="fab" ref={fabRef} aria-label="Adicionar lançamento" onClick={openAdd}><Icon name="adicionar" size={22}/></button>
-        <button className={tab==="orcamento"?"on":""} onClick={()=>setTab("orcamento")} aria-label="Orçamento"><Icon name="orcamento" size={20}/><span>Orçamento</span></button>
-        <button onClick={()=>setMoreOpen(true)} aria-label="Mais opções"><Icon name="mais" size={20}/><span>Mais</span></button>
+        {(()=>{const sec=NAV_SECTIONS.find(x=>x.key==="home");return <button className={curSection.key===sec.key?"on":""} onClick={()=>goSection(sec)} aria-label={sec.label}><Icon name={sec.icon} size={20}/><span>{sec.label}</span></button>;})()}
+        {(()=>{const sec=NAV_SECTIONS.find(x=>x.key==="gastos");return <button className={curSection.key===sec.key?"on":""} onClick={()=>goSection(sec)} aria-label={sec.label}><Icon name={sec.icon} size={20}/><span>{sec.label}</span></button>;})()}
+        <button className="fab" ref={fabRef} aria-label="Novo movimento" onClick={openAdd}><Icon name="adicionar" size={22}/></button>
+        {(()=>{const sec=NAV_SECTIONS.find(x=>x.key==="orcamento");return <button className={curSection.key===sec.key?"on":""} onClick={()=>goSection(sec)} aria-label={sec.label}><Icon name={sec.icon} size={20}/><span>{sec.label}</span></button>;})()}
+        {(()=>{const sec=NAV_SECTIONS.find(x=>x.key==="investimentos");return <button className={curSection.key===sec.key?"on":""} onClick={()=>goSection(sec)} aria-label={sec.label}><Icon name={sec.icon} size={20}/><span>{sec.label}</span></button>;})()}
       </nav>
 
-      <Sheet open={moreOpen} onClose={()=>setMoreOpen(false)} title="Mais">
-        {MORE_TABS.map(([k,l,ic])=>
-          <button key={k} className="sheetlistitem" onClick={()=>{setTab(k);setMoreOpen(false);}}>
-            <Icon name={ic} size={18}/> <span>{l}</span>
-          </button>)}
-        <div className="sheetdivider"/>
-        <button className="sheetlistitem" onClick={()=>{setSettingsOpen(true);setMoreOpen(false);}}><Icon name="config" size={18}/> Configurações</button>
-        <button className="sheetlistitem" onClick={()=>{exportData();setMoreOpen(false);}}><Icon name="baixar" size={18}/> Exportar backup (.json)</button>
-        <button className="sheetlistitem" onClick={()=>{exportCSV();setMoreOpen(false);}}><Icon name="baixar" size={18}/> Exportar dados (.csv)</button>
-        <button className="sheetlistitem" onClick={()=>{fileRef.current?.click();setMoreOpen(false);}}><Icon name="enviar" size={18}/> Importar backup</button>
-        {sb && <button className="sheetlistitem danger" onClick={()=>{signOut();setMoreOpen(false);}}><Icon name="sair" size={18}/> Sair da conta</button>}
-        <div className="versionline">Razão versão {APP_VERSION} · {fmtDateBR(APP_BUILD)}</div>
-      </Sheet>
+      {/* no computador não há barra inferior: o "novo movimento" fica num botão flutuante fixo, visível em todas as telas */}
+      <button className="fabfloat" ref={fabDeskRef} aria-label="Novo movimento" onClick={openAdd}><Icon name="adicionar" size={20}/><span>Novo movimento</span></button>
 
-      <Sheet open={settingsOpen} onClose={()=>setSettingsOpen(false)} title="Configurações">
-        <div className="sub" style={{marginBottom:6}}>Valor da sua hora de trabalho (opcional)</div>
-        <Money cents={settings?.hourlyWageCents||0} onChange={v=>update(d=>({settings:{...d.settings,hourlyWageCents:v}}))} small/>
-        <div className="hint">Preenchendo, os lançamentos passam a mostrar quantas horas de trabalho aquele valor representa. Deixe em R$ 0,00 para desligar.</div>
-        <div className="sheetdivider"/>
-        <div className="sub" style={{marginBottom:6}}>Motor de IA usado para ler extratos e faturas</div>
-        <div className="seg" style={{marginBottom:6}}>
-          {Object.entries(AI_MODELS).map(([k,m])=>
-            <button key={k} className={(settings?.aiModel||"rapido")===k?"on in":""} onClick={()=>update(d=>({settings:{...d.settings,aiModel:k}}))}>{m.label}</button>)}
-        </div>
-        <div className="hint">{AI_MODELS[settings?.aiModel||"rapido"].hint} Se um documento vier bagunçado ou com muitas linhas erradas, troque para "Cuidadoso" e mande de novo só aquele arquivo.</div>
-        <div className="sheetdivider"/>
-        <div className="sub" style={{marginBottom:8}}>Cor de marca do site</div>
-        <div className="colorgrid">
-          {COLOR_THEMES.map(t=>{
-            const active=(settings?.colorTheme||"aco")===t.id;
-            const swatch = theme==="dark" ? t.dark.accent : t.light.accent;
-            return (
-              <button key={t.id} type="button" className={"colorswatch"+(active?" on":"")}
-                style={{"--sw":swatch}} title={t.name} aria-label={"Usar cor "+t.name} aria-pressed={active}
-                onClick={()=>update(d=>({settings:{...d.settings,colorTheme:t.id}}))}>
-                {active && <Icon name="check" size={14}/>}
-              </button>
-            );
-          })}
-        </div>
-        <div className="hint">{COLOR_THEME_MAP[settings?.colorTheme||"aco"].name} — usada em botões, navegação ativa e destaques. As cores de ganho, gasto, investimento e aviso não mudam com a escolha aqui.</div>
-        <div className="sheetdivider"/>
-        <div className="kv"><span className="kk">Versão do app</span><span className="vv">{APP_VERSION}</span></div>
-        <div className="kv"><span className="kk">Atualizado em</span><span className="vv">{fmtDateBR(APP_BUILD)}</span></div>
-        {novaVersao
-          ? <button className="sbtn primary" style={{marginTop:10}} onClick={()=>window.location.reload()}><Icon name="brilho" size={14}/> Instalar a versão nova</button>
-          : <div className="hint">Você está na versão mais recente que este aparelho baixou. Quando sair uma nova, um aviso aparece aqui e no topo da tela.</div>}
-        <div className="sheetdivider"/>
-        <div className="sub" style={{marginBottom:6,color:"var(--neg)"}}>Zona de risco</div>
-        <div className="hint" style={{marginTop:0}}>
-          Apaga todas as transações, contas e cartões cadastrados — útil para começar do zero depois de ligar o Open Finance, sem lançamento de teste misturado com o que chega automático do banco.
-          As conexões do Open Finance continuam vinculadas (não precisa reconectar no Pluggy), e metas, orçamentos e categorização aprendida não são afetados.
-          Isso não pode ser desfeito por aqui — vale <button type="button" className="saveretry" style={{fontSize:"inherit"}} onClick={()=>exportData()}>exportar um backup</button> antes.
-        </div>
-        <input className="fld" value={resetConfirmText} onChange={e=>setResetConfirmText(e.target.value)} placeholder='Digite "apagar"' style={{margin:"10px 0 4px"}}/>
-        <button className="sbtn danger" style={{marginTop:6}} disabled={resetConfirmText.trim().toLowerCase()!=="apagar"} onClick={resetFinanceiro}>
-          <Icon name="excluir" size={14}/> Apagar transações, contas e cartões
-        </button>
-      </Sheet>
 
-      <Sheet open={sheetOpen} onClose={()=>setSheetOpen(false)} title={sheetEditTx?"Editar lançamento":"Novo lançamento"} returnFocusRef={fabRef}>
+
+      <Sheet open={sheetOpen} onClose={()=>setSheetOpen(false)} title={sheetEditTx?"Editar lançamento":"Novo lançamento"} returnFocusRef={isDesktop?fabDeskRef:fabRef}>
         <TransactionForm accounts={accounts} txs={txs} update={update} editTx={sheetEditTx} propagateIds={sheetPropagateIds} onDone={()=>setSheetOpen(false)} categoryMemory={categoryMemory} autoFocus/>
       </Sheet>
 
@@ -3285,14 +3302,12 @@ function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTo
   const [aiSummary,setAiSummary]=useState("");
   const [aiSummaryBusy,setAiSummaryBusy]=useState(false);
   const [aiSummaryError,setAiSummaryError]=useState("");
-  const [inlineEditTx,setInlineEditTx]=useState(null);
   useEffect(()=>{ setAiSummary(""); setAiSummaryError(""); },[monthLabel]);
 
-  const [inlinePropagateIds,setInlinePropagateIds]=useState([]);
   function requestEdit(t){
     function proceed(propagateIds){
-      if(isDesktop){ setInlineEditTx(t); setInlinePropagateIds(propagateIds); window.scrollTo({top:0,behavior:"smooth"}); }
-      else onEditMobile(t, propagateIds);
+      // celular e computador editam no mesmo modal do "novo movimento" (antes o computador editava num formulário fixo no topo)
+      onEditMobile(t, propagateIds);
     }
     if(t.seriesId){
       askSeriesScope({ tx:t, txs, action:"editar", onChoice:(ids)=>proceed(ids.filter(id=>id!==t.id)) });
@@ -3316,7 +3331,6 @@ function Balanco({ grouped, monthLabel, totals, prevTotals, sparkline, plannedTo
       setPendingDeleteIds(prev=>{ const n=new Set(prev); ids.forEach(id=>n.delete(id)); return n; });
     },6000);
     ids.forEach(id=>pendingTimers.current.set(id, timer));
-    if(inlineEditTx&&ids.includes(inlineEditTx.id)) setInlineEditTx(null);
     const label = ids.length>1 ? `${ids.length} lançamentos excluídos.` : `"${primaryTx.description||primaryTx.category||TYPES[primaryTx.type].label}" excluído.`;
     toast(label,"default",{
       duration:6000,
@@ -3505,7 +3519,6 @@ ${AI_SUMMARY_STYLE}`;
           </div>
         </div>
 
-        <TransactionForm accounts={accounts} txs={txs} update={update} editTx={inlineEditTx} propagateIds={inlinePropagateIds} onDone={()=>{setInlineEditTx(null);setInlinePropagateIds([]);}} categoryMemory={categoryMemory} key={inlineEditTx?inlineEditTx.id:"new"}/>
       </div>
 
       {(displayTotals.inc>0||displayTotals.exp>0||displayTotals.inv>0) &&
@@ -3625,7 +3638,7 @@ ${AI_SUMMARY_STYLE}`;
         : (Object.keys(grouped).length===0 &&
             <EmptyState icon="documento" title={`Nenhum lançamento em ${monthLabel}`}
               text={isDesktop
-                ? "Preencha o formulário aqui em cima para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo."
+                ? "Use o botão \"Novo movimento\" no canto da tela para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo."
                 : "Toque no botão + para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo."}
               action={{label:"Importar extratos e faturas",icon:"brilho",onClick:()=>goToTab("extrato")}}
               secondary={{label:"Ver no manual",onClick:()=>openHelp("registrar-lancamentos")}}/>)}
@@ -4161,7 +4174,7 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
       {byCatAll.length>0 &&
         <div className="card g-12">
           <h3>Gastos por categoria (todo o período)</h3>
-          <div className="sub" style={{marginBottom:0}}>Clique numa categoria pra ver os lançamentos no Balanço.</div>
+          <div className="sub" style={{marginBottom:0}}>Clique numa categoria pra ver os lançamentos em Gastos.</div>
           <div style={{display:"flex",gap:18,alignItems:"center",flexWrap:"wrap"}}>
             <Donut data={byCatAll} centerLabel="gastos" onSelect={(name)=>goToTab("balanco",{category:name})}/>
             <div style={{flex:1,minWidth:180}}><Legend data={byCatAll} onSelect={(name)=>goToTab("balanco",{category:name})}/></div>
@@ -4171,7 +4184,7 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
       {byTagAll.length>0 &&
         <div className="card g-12">
           <h3>Gasto por tag (todo o período)</h3>
-          <div className="sub" style={{marginBottom:0}}>Somado a partir das #tags usadas na descrição dos lançamentos. Clique numa tag pra ver os lançamentos no Balanço.</div>
+          <div className="sub" style={{marginBottom:0}}>Somado a partir das #tags usadas na descrição dos lançamentos. Clique numa tag pra ver os lançamentos em Gastos.</div>
           <div style={{display:"flex",gap:18,alignItems:"center",flexWrap:"wrap"}}>
             <Donut data={byTagAll} centerLabel="gasto" onSelect={(name)=>goToTab("balanco",{tag:name.replace(/^#/,"")})}/>
             <div style={{flex:1,minWidth:180}}><Legend data={byTagAll} onSelect={(name)=>goToTab("balanco",{tag:name.replace(/^#/,"")})}/></div>
@@ -5753,7 +5766,7 @@ function Extrato({ accounts, update, txs, aiModel, pluggy, categoryMemory }){
               <div className="docbody">
                 {doc.meta?.observacao && <p className="hint" style={{marginTop:0,marginBottom:8}}>{doc.meta.observacao}{doc.meta.confianca!=null?` · confiança ${Math.round(doc.meta.confianca*100)}%`:""}</p>}
                 {doc.meta?.contaVia==="numero" && <p className="hint" style={{marginTop:0,marginBottom:8,color:"var(--pos)"}}>Conta reconhecida pelo número, não pelo nome — este banco já foi importado antes.</p>}
-                {doc.meta?.contaVia==="nova" && <p className="hint" style={{marginTop:0,marginBottom:8,color:"var(--pos)"}}>Conta criada automaticamente para esta conexão. Pode renomear em Contas quando quiser.</p>}
+                {doc.meta?.contaVia==="nova" && <p className="hint" style={{marginTop:0,marginBottom:8,color:"var(--pos)"}}>Conta criada automaticamente para esta conexão. Pode renomear em Configurações › Contas e bancos quando quiser.</p>}
                 {doc.meta?.fonte==="pluggy" && <p className="hint" style={{marginTop:0,marginBottom:8,color:"var(--pos)"}}><Icon name="escudo" size={12}/> Veio direto do banco pelo Open Finance — nenhum arquivo, nenhuma digitação.</p>}
                 {(doc.meta?.ativos||[]).length>0 && <AtivosDaNota doc={doc} update={update} onDone={()=>patchDoc(doc.id,{meta:{...doc.meta,ativos:[]}})}/>}
                 {acct && tipo==="fatura" && acct.kind!=="cartao" &&
@@ -5928,8 +5941,8 @@ function SwipeDiagram(){
   );
 }
 function BottomNavDiagram(){
-  const left=[["Panorama",40],["Balanço",110]];
-  const right=[["Orçamento",250],["Mais",310]];
+  const left=[["Home",40],["Gastos",110]];
+  const right=[["Orçamento",250],["Investimentos",310]];
   return (
     <svg viewBox="0 0 350 76" width="100%" height="76" style={{maxWidth:360,display:"block"}} role="img" aria-label="Diagrama: barra inferior do celular com o botão de adicionar lançamento no centro">
       <rect x="0" y="6" width="350" height="56" rx="14" fill="var(--surface)" stroke="var(--hairline)"/>
@@ -5958,7 +5971,7 @@ const HELP_SECTIONS=[
   {id:"extrato-ajuda",n:8,title:"Importar do banco",kw:"extrato inteligente extrato pdf recibo foto print imagem importar colar texto duplicata auditoria fatura nota de corretagem corretora ativos carteira vários múltiplos bancos open finance pluggy conectar banco sincronizar automático lote arrastar progresso ia modelo transferência entre bancos pagamento de fatura trocar conta em massa"},
   {id:"assistente-ajuda",n:9,title:"Assistente",kw:"assistente perguntar pergunta ia inteligência artificial"},
   {id:"busca-filtros",n:10,title:"Busca e filtros",kw:"busca buscar filtro filtros chip categoria conta data valor status previsto realizado tag"},
-  {id:"panorama-ajuda",n:11,title:"Panorama",kw:"panorama patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"},
+  {id:"panorama-ajuda",n:11,title:"Home",kw:"home resumo panorama patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"},
   {id:"backup-seguranca",n:12,title:"Backup e segurança",kw:"backup exportar importar json csv mesclar substituir segurança senha dados bancários"},
   {id:"faq",n:13,title:"Perguntas frequentes",kw:"saldo não bate fatura sumiu esqueci senha offline internet dúvida"},
 ];
@@ -5999,10 +6012,10 @@ function replayTour(){ tourListener && tourListener(); }
 const TOUR_STEPS=[
   { title:"Bem-vindo ao Razão", text:"Um jeito rápido de registrar e entender seu dinheiro, sem planilha. Vamos ver o essencial em poucos passos." },
   { title:"O caminho mais rápido: importar do banco", text:"Baixe os PDFs do mês no site do seu banco e do seu cartão e jogue todos de uma vez em \"Importar do banco\". A IA descobre de qual banco é cada arquivo, separa gasto, entrada, pagamento de fatura e transferência entre bancos — você só confere e importa." },
-  { title:"Ou registre na mão, quando preferir", text:"Gastos, ganhos, investimentos e transferências — use o botão de adicionar (o + central no celular, ou o formulário no topo do Balanço no computador)." },
-  { title:"Acompanhe pelo Panorama e Balanço", text:"O Panorama mostra o histórico completo desde o início; o Balanço mostra mês a mês, com gráficos e orçamento." },
+  { title:"Ou registre na mão, quando preferir", text:"Gastos, ganhos, investimentos e transferências — use o botão de adicionar (o + central no celular, ou o botão \"Novo movimento\" no canto da tela, no computador)." },
+  { title:"Acompanhe pela Home e por Gastos", text:"A Home mostra o resumo e o histórico completo desde o início; Gastos mostra mês a mês, com gráficos, busca e filtros." },
   { title:"Nomeie suas contas com o banco de verdade", text:"Em Contas, troque \"Conta principal\" pelo nome real (Nubank, Itaú, Inter). É por esse nome que a importação reconhece sozinha de quem é cada PDF. Aproveite e configure fechamento e vencimento dos cartões: assim um gasto no cartão conta na fatura do mês certo, não no mês da compra." },
-  { title:"Precisa de ajuda?", text:"A aba Ajuda tem um manual completo com exemplos ao vivo, e o ícone \"?\" nos cartões principais leva direto pra seção certa." },
+  { title:"Precisa de ajuda?", text:"A Ajuda (em Configurações) tem um manual completo com exemplos ao vivo, e o ícone \"?\" nos cartões principais leva direto pra seção certa." },
 ];
 function WelcomeTour(){
   const [open,setOpen]=useState(false);
@@ -6135,7 +6148,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
               "Uma transferência não conta como gasto nem ganho no seu total do mês — ela só move saldo entre contas.",
               "Pra pagar a fatura do cartão: transfira da conta corrente para o cartão, no valor da fatura.",
             ]}
-            tip="Transferir para o cartão reduz o valor da fatura em aberto na hora — dá pra conferir em Contas.">
+            tip="Transferir para o cartão reduz o valor da fatura em aberto na hora — dá pra conferir em Configurações › Contas e bancos.">
             <HelpExample label="lançamento de transferência">
               <TxRow t={DEMO_DATA.transactions.find(t=>t.type==="transferencia")} cls="trf" acc={null} isTrf shifted={false} flowLabel={null}
                 acctName={DEMO_ACCT_NAME} onEdit={()=>{}} onDelete={()=>{}} onMarkPaid={()=>{}}/>
@@ -6202,7 +6215,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
             steps={[
               "Cadastre cada ativo com o valor aplicado e o valor atual — a diferença é o rendimento.",
               "Lançamentos do tipo Investimento contam como aporte do mês; do tipo Ganho na categoria \"Proventos\" contam como provento.",
-              "Selic, CDI e IPCA (Banco Central) aparecem no Panorama, atualizados uma vez por dia.",
+              "Selic, CDI e IPCA (Banco Central) aparecem na Home, atualizados uma vez por dia.",
               "Independência Financeira mostra quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios.",
             ]}
             tip="100% de Independência Financeira significa: se você parasse de trabalhar, os proventos médios sozinhos cobririam seus gastos médios.">
@@ -6219,7 +6232,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
             purpose="Fechar o mês inteiro de uma vez: conecte o banco pelo Open Finance ou jogue aqui todos os documentos dos seus bancos, cartões e corretora — a IA lê, identifica e classifica tudo."
             steps={[
               "Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.",
-              "A conta e o cartão de cada banco conectado são criados sozinhos na primeira sincronização — não precisa cadastrar nada em Contas antes. Nas sincronizações seguintes, o app reconhece o mesmo banco pelo número da conta/cartão, sem criar duplicata.",
+              "A conta e o cartão de cada banco conectado são criados sozinhos na primeira sincronização — não precisa cadastrar nada em Contas e bancos antes. Nas sincronizações seguintes, o app reconhece o mesmo banco pelo número da conta/cartão, sem criar duplicata.",
               "Não precisa lembrar de clicar em Atualizar: toda vez que você abre esta aba, qualquer conexão sem sincronizar há mais de 20 horas atualiza sozinha. Isso só acontece com a aba aberta — o app não roda em segundo plano com o celular fechado, e nada é importado sem passar pela sua revisão.",
               "Se os seus bancos já estão conectados no Meu Pluggy (meu.pluggy.ai), use \"Já uso o Meu Pluggy\": cole o itemId de cada conexão e pronto, sem passar pela tela de conectar de novo. O app confere o id antes de guardar. Vale lembrar que o itemId precisa ter sido criado pela mesma aplicação do Pluggy configurada no servidor.",
               "Atualizar duas vezes no mesmo mês não duplica nada: cada lançamento importado guarda o id que tem no Pluggy, e o que já entrou é ignorado na busca seguinte — o app avisa quantos ficaram de fora.",
@@ -6235,7 +6248,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
               "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).",
               "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado.",
             ]}
-            tip="Se a IA estiver fora do ar ou sem cota, o PDF ainda é lido localmente pelo leitor embutido (só reconhece gasto e ganho, sem identificar banco nem transferência). Em Configurações dá para trocar o motor de IA entre Rápido e Cuidadoso — vale mudar para Cuidadoso quando alguma fatura vier com muitas linhas erradas. Arquivos acima de 3 MB podem não caber numa leitura só.">
+            tip="Se a IA estiver fora do ar ou sem cota, o PDF ainda é lido localmente pelo leitor embutido (só reconhece gasto e ganho, sem identificar banco nem transferência). Em Configurações › Preferências dá para trocar o motor de IA entre Rápido e Cuidadoso — vale mudar para Cuidadoso quando alguma fatura vier com muitas linhas erradas. Arquivos acima de 3 MB podem não caber numa leitura só.">
             <HelpExample label="a IA lendo a fila de documentos">
               <div className="aithink">
                 <div className="aiorb"><i/><i/><i/><span className="core"/></div>
@@ -6289,7 +6302,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
           <HelpSection id="busca-filtros" n={10} title="Busca e filtros"
             purpose="Encontrar lançamentos específicos em todo o histórico, não só no mês exibido."
             steps={[
-              "No Balanço, digite na busca por descrição ou por #tag — o resultado aparece enquanto você digita.",
+              "Em Gastos, digite na busca por descrição ou por #tag — o resultado aparece enquanto você digita.",
               "Abra Filtros pra combinar conta, tipo, categoria, tags, intervalo de datas, status (previsto/realizado) e faixa de valor.",
               "Cada filtro ativo vira um chip removível; \"Limpar tudo\" reseta de uma vez.",
               "Clicar numa categoria no gráfico, ou numa tag na lista, também aplica o filtro correspondente.",
@@ -6304,7 +6317,7 @@ function Ajuda({ helpTarget, onConsumeTarget }){
           </HelpSection>}
 
         {visible("panorama-ajuda") &&
-          <HelpSection id="panorama-ajuda" n={11} title="Panorama"
+          <HelpSection id="panorama-ajuda" n={11} title="Home"
             purpose="A visão consolidada de todos os meses e contas, com os indicadores extras."
             steps={[
               "Saldo por conta soma tudo desde o início; Patrimônio estimado soma contas (sem cartão) + carteira de investimentos.",

@@ -1,6 +1,6 @@
 /* Gerado automaticamente por build.js — não edite este arquivo à mão.
    Para atualizar, edite o JSX dentro de index.html e rode: node build.js
-   Versão 1.2.35 · compilado em 2026-08-24T19:13:09.176Z */
+   Versão 1.2.38 · compilado em 2026-10-07T00:05:43.809Z */
 const {
   useState,
   useEffect,
@@ -22,8 +22,8 @@ const {
    build novo invalida o anterior e quem está com o site aberto recebe o
    aviso de atualização.
    ======================================================================= */
-const APP_VERSION = "1.2.35";
-const APP_BUILD = "2026-08-24";
+const APP_VERSION = "1.2.38";
+const APP_BUILD = "2026-10-07";
 const SUPABASE_URL = "https://xgdigegpxnoybklmyeyq.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U";
 const configured = SUPABASE_URL.startsWith("https://") && !SUPABASE_URL.includes("SEU-PROJETO") && SUPABASE_ANON_KEY.length > 20 && !SUPABASE_ANON_KEY.includes("SUA-CHAVE");
@@ -2478,23 +2478,38 @@ const COLOR_THEMES = [{
   }
 }];
 const COLOR_THEME_MAP = Object.fromEntries(COLOR_THEMES.map(t => [t.id, t]));
-const TAB_GROUPS = [{
-  label: "Principal",
-  items: [["geral", "Panorama", "panorama"], ["balanco", "Balanço", "calendario"], ["extrato", "Importar do banco", "extrato"]]
+
+/* navegação: 5 seções no menu principal (barra lateral no computador, barra inferior no celular). Cada
+   seção agrupa uma ou mais telas — as abas antigas — trocadas por um seletor no topo da seção. Nada foi
+   removido, só reagrupado. As chaves das telas ("geral", "balanco"…) continuam as mesmas, então
+   goToTab()/openHelp() e os links internos seguem funcionando sem mudança. */
+const NAV_SECTIONS = [{
+  key: "home",
+  label: "Home",
+  icon: "panorama",
+  views: [["geral", "Resumo"], ["perguntar", "Assistente"]]
 }, {
-  label: "Planejamento",
-  items: [["orcamento", "Orçamento", "orcamento"], ["metas", "Metas", "metas"], ["investimentos", "Investimentos", "investimentos"]]
+  key: "gastos",
+  label: "Gastos",
+  icon: "calendario",
+  views: [["balanco", "Lançamentos"], ["extrato", "Importar do banco"]]
 }, {
-  label: "Ferramentas",
-  items: [["perguntar", "Assistente", "assistente"]]
+  key: "orcamento",
+  label: "Orçamento",
+  icon: "orcamento",
+  views: [["orcamento", "Orçamento"]]
 }, {
+  key: "investimentos",
+  label: "Investimentos",
+  icon: "investimentos",
+  views: [["investimentos", "Carteira"], ["metas", "Metas"]]
+}, {
+  key: "config",
   label: "Configurações",
-  items: [["contas", "Contas", "contas"]]
-}, {
-  label: "Suporte",
-  items: [["ajuda", "Ajuda", "ajuda"]]
+  icon: "config",
+  views: [["contas", "Contas e bancos"], ["preferencias", "Preferências"], ["ajuda", "Ajuda"]]
 }];
-const MORE_TABS = TAB_GROUPS.flatMap(g => g.items).filter(([k]) => !["geral", "balanco", "orcamento"].includes(k));
+const sectionOfView = v => NAV_SECTIONS.find(sec => sec.views.some(([k]) => k === v)) || NAV_SECTIONS[0];
 
 /* hook simples de breakpoint: só usado onde o comportamento (não só o visual) muda entre mobile e desktop */
 function useIsDesktop() {
@@ -3666,7 +3681,18 @@ function App() {
   const loaded = loadStatus === "ok"; // compat: usado pelas abas como "dados prontos"
 
   const [view, setView] = useState(new Date());
-  const [tab, setTab] = useState("balanco");
+  const [tab, setTab] = useState("geral");
+  // última tela vista em cada seção: voltar pra "Gastos" reabre "Importar do banco" se era lá que a pessoa estava
+  const [lastView, setLastView] = useState({});
+  useEffect(() => {
+    const sec = sectionOfView(tab);
+    setLastView(m => m[sec.key] === tab ? m : {
+      ...m,
+      [sec.key]: tab
+    });
+  }, [tab]);
+  const curSection = sectionOfView(tab);
+  const goSection = sec => setTab(lastView[sec.key] || sec.views[0][0]);
   const [helpTarget, setHelpTarget] = useState(null);
   // filtro pendente pra aplicar assim que a aba de destino abrir (ver goToTab) — ex: clicar numa
   // categoria no Panorama chega no Balanço já com aquela categoria filtrada na lista
@@ -3683,7 +3709,6 @@ function App() {
   useEffect(() => {
     tabListener = (t, filter) => {
       setTab(t);
-      setMoreOpen(false);
       if (filter) setPendingFilter(filter);
     };
     return () => {
@@ -3734,8 +3759,6 @@ function App() {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [activePopover]);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   // aviso de versão nova: quem chama é o registro do service worker (no fim do arquivo), assim que
   // termina de baixar um build mais recente. Nada recarrega sozinho — a decisão é de quem está usando,
   // pra não perder o que estiver sendo digitado no meio de um lançamento.
@@ -3756,6 +3779,7 @@ function App() {
   const [sheetEditTx, setSheetEditTx] = useState(null);
   const [sheetPropagateIds, setSheetPropagateIds] = useState([]);
   const fabRef = useRef(null);
+  const fabDeskRef = useRef(null);
   function openAdd() {
     setSheetEditTx(null);
     setSheetPropagateIds([]);
@@ -4186,7 +4210,6 @@ function App() {
       accounts: []
     }));
     setResetConfirmText("");
-    setSettingsOpen(false);
     toast("Transações, contas e cartões apagados. Se você usa Open Finance, a próxima sincronização recria as contas sozinha.", "success");
   }
   function importData(e) {
@@ -4225,7 +4248,6 @@ function App() {
     };
     r.readAsText(f);
     setMenu(false);
-    setMoreOpen(false);
     e.target.value = "";
   }
   function applyImport() {
@@ -4386,7 +4408,7 @@ function App() {
     className: "saveretry",
     onClick: retrySaveNow
   }, "Tentar de novo")), /*#__PURE__*/React.createElement("button", {
-    className: "iconbtn",
+    className: "iconbtn themetoggle",
     "aria-label": "Alternar tema",
     onClick: () => update(d => ({
       theme: d.theme === "dark" ? "light" : "dark"
@@ -4394,51 +4416,14 @@ function App() {
   }, /*#__PURE__*/React.createElement(Icon, {
     name: theme === "dark" ? "sol" : "lua",
     size: 17
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "menu"
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "iconbtn",
-    ref: menuTriggerRef,
-    "aria-label": "Menu",
-    "aria-expanded": menu,
-    onClick: () => setMenu(m => !m)
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "mais",
-    size: 17
-  })), menu && /*#__PURE__*/React.createElement("div", {
-    className: "menupop",
-    ref: menuPopRef
-  }, session && /*#__PURE__*/React.createElement("div", {
-    className: "who"
-  }, session.user.email), /*#__PURE__*/React.createElement("button", {
-    onClick: () => {
-      setSettingsOpen(true);
-      setMenu(false);
-    }
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "iconbtn" + (curSection.key === "config" ? " on" : ""),
+    "aria-label": "Configurações",
+    onClick: () => setTab("preferencias")
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "config",
-    size: 16
-  }), " Configurações"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => exportData()
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "baixar",
-    size: 16
-  }), " Exportar backup (.json)"), /*#__PURE__*/React.createElement("button", {
-    onClick: exportCSV
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "baixar",
-    size: 16
-  }), " Exportar dados (.csv)"), /*#__PURE__*/React.createElement("button", {
-    onClick: () => fileRef.current?.click()
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "enviar",
-    size: 16
-  }), " Importar backup"), sb && /*#__PURE__*/React.createElement("button", {
-    onClick: signOut
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "sair",
-    size: 16
-  }), " Sair da conta")), /*#__PURE__*/React.createElement("input", {
+    size: 17
+  })), /*#__PURE__*/React.createElement("input", {
     ref: fileRef,
     type: "file",
     accept: "application/json",
@@ -4446,32 +4431,32 @@ function App() {
       display: "none"
     },
     onChange: importData
-  }))))), /*#__PURE__*/React.createElement("div", {
+  })))), /*#__PURE__*/React.createElement("div", {
     className: "wrap"
   }, /*#__PURE__*/React.createElement("div", {
     className: "shell"
   }, /*#__PURE__*/React.createElement("nav", {
     className: "sidebar",
     "aria-label": "Navegação principal"
-  }, TAB_GROUPS.map((g, gi) => /*#__PURE__*/React.createElement("div", {
-    className: "navgroup",
-    key: gi
   }, /*#__PURE__*/React.createElement("div", {
-    className: "navgrouplabel"
-  }, g.label), g.items.map(([k, l, ic]) => /*#__PURE__*/React.createElement("button", {
-    key: k,
-    className: "navitem" + (tab === k ? " on" : ""),
-    "data-tip": l,
-    "aria-current": tab === k ? "page" : undefined,
-    onClick: () => setTab(k)
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "navic"
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: ic,
-    size: 18
-  })), /*#__PURE__*/React.createElement("span", {
-    className: "navlbl"
-  }, l))))), /*#__PURE__*/React.createElement("div", {
+    className: "navgroup"
+  }, NAV_SECTIONS.map(sec => {
+    const on = curSection.key === sec.key;
+    return /*#__PURE__*/React.createElement("button", {
+      key: sec.key,
+      className: "navitem" + (on ? " on" : ""),
+      "data-tip": sec.label,
+      "aria-current": on ? "page" : undefined,
+      onClick: () => goSection(sec)
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "navic"
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: sec.icon,
+      size: 18
+    })), /*#__PURE__*/React.createElement("span", {
+      className: "navlbl"
+    }, sec.label));
+  })), /*#__PURE__*/React.createElement("div", {
     className: "navfooter"
   }, /*#__PURE__*/React.createElement("span", {
     className: "navavatar"
@@ -4484,7 +4469,17 @@ function App() {
     className: "ver"
   }, "versão ", APP_VERSION)))), /*#__PURE__*/React.createElement("div", {
     className: "tabcontent"
-  }, !sb && /*#__PURE__*/React.createElement("div", {
+  }, curSection.views.length > 1 && /*#__PURE__*/React.createElement("div", {
+    className: "subnav",
+    role: "tablist",
+    "aria-label": curSection.label
+  }, curSection.views.map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    role: "tab",
+    "aria-selected": tab === k,
+    className: tab === k ? "on" : "",
+    onClick: () => setTab(k)
+  }, l))), !sb && /*#__PURE__*/React.createElement("div", {
     className: "banner"
   }, "Modo local: os dados ficam só neste aparelho. Configure o Supabase no início do arquivo para ter login e sincronização entre dispositivos."), offlineReadOnly && /*#__PURE__*/React.createElement("div", {
     className: "banner err"
@@ -4572,112 +4567,39 @@ function App() {
   }), tab === "ajuda" && /*#__PURE__*/React.createElement(Ajuda, {
     helpTarget: helpTarget,
     onConsumeTarget: () => setHelpTarget(null)
-  })))), /*#__PURE__*/React.createElement("nav", {
-    className: "bottomnav",
-    "aria-label": "Navegação"
+  }), tab === "preferencias" && /*#__PURE__*/React.createElement("div", {
+    className: "card prefs"
+  }, /*#__PURE__*/React.createElement("h3", null, "Preferências"), /*#__PURE__*/React.createElement("div", {
+    className: "sub"
+  }, "Aparência, dados e conta. Contas e bancos ficam na tela ao lado."), /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 6
+    }
+  }, "Tema"), /*#__PURE__*/React.createElement("div", {
+    className: "seg",
+    style: {
+      marginBottom: 6
+    }
   }, /*#__PURE__*/React.createElement("button", {
-    className: tab === "geral" ? "on" : "",
-    onClick: () => setTab("geral"),
-    "aria-label": "Panorama"
+    className: theme !== "dark" ? "on in" : "",
+    onClick: () => update({
+      theme: "light"
+    })
   }, /*#__PURE__*/React.createElement(Icon, {
-    name: "panorama",
-    size: 20
-  }), /*#__PURE__*/React.createElement("span", null, "Panorama")), /*#__PURE__*/React.createElement("button", {
-    className: tab === "balanco" ? "on" : "",
-    onClick: () => setTab("balanco"),
-    "aria-label": "Balanço"
+    name: "sol",
+    size: 14
+  }), " Claro"), /*#__PURE__*/React.createElement("button", {
+    className: theme === "dark" ? "on in" : "",
+    onClick: () => update({
+      theme: "dark"
+    })
   }, /*#__PURE__*/React.createElement(Icon, {
-    name: "calendario",
-    size: 20
-  }), /*#__PURE__*/React.createElement("span", null, "Balanço")), /*#__PURE__*/React.createElement("button", {
-    className: "fab",
-    ref: fabRef,
-    "aria-label": "Adicionar lançamento",
-    onClick: openAdd
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "adicionar",
-    size: 22
-  })), /*#__PURE__*/React.createElement("button", {
-    className: tab === "orcamento" ? "on" : "",
-    onClick: () => setTab("orcamento"),
-    "aria-label": "Orçamento"
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "orcamento",
-    size: 20
-  }), /*#__PURE__*/React.createElement("span", null, "Orçamento")), /*#__PURE__*/React.createElement("button", {
-    onClick: () => setMoreOpen(true),
-    "aria-label": "Mais opções"
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "mais",
-    size: 20
-  }), /*#__PURE__*/React.createElement("span", null, "Mais"))), /*#__PURE__*/React.createElement(Sheet, {
-    open: moreOpen,
-    onClose: () => setMoreOpen(false),
-    title: "Mais"
-  }, MORE_TABS.map(([k, l, ic]) => /*#__PURE__*/React.createElement("button", {
-    key: k,
-    className: "sheetlistitem",
-    onClick: () => {
-      setTab(k);
-      setMoreOpen(false);
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: ic,
-    size: 18
-  }), " ", /*#__PURE__*/React.createElement("span", null, l))), /*#__PURE__*/React.createElement("div", {
+    name: "lua",
+    size: 14
+  }), " Escuro")), /*#__PURE__*/React.createElement("div", {
     className: "sheetdivider"
-  }), /*#__PURE__*/React.createElement("button", {
-    className: "sheetlistitem",
-    onClick: () => {
-      setSettingsOpen(true);
-      setMoreOpen(false);
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "config",
-    size: 18
-  }), " Configurações"), /*#__PURE__*/React.createElement("button", {
-    className: "sheetlistitem",
-    onClick: () => {
-      exportData();
-      setMoreOpen(false);
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "baixar",
-    size: 18
-  }), " Exportar backup (.json)"), /*#__PURE__*/React.createElement("button", {
-    className: "sheetlistitem",
-    onClick: () => {
-      exportCSV();
-      setMoreOpen(false);
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "baixar",
-    size: 18
-  }), " Exportar dados (.csv)"), /*#__PURE__*/React.createElement("button", {
-    className: "sheetlistitem",
-    onClick: () => {
-      fileRef.current?.click();
-      setMoreOpen(false);
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "enviar",
-    size: 18
-  }), " Importar backup"), sb && /*#__PURE__*/React.createElement("button", {
-    className: "sheetlistitem danger",
-    onClick: () => {
-      signOut();
-      setMoreOpen(false);
-    }
-  }, /*#__PURE__*/React.createElement(Icon, {
-    name: "sair",
-    size: 18
-  }), " Sair da conta"), /*#__PURE__*/React.createElement("div", {
-    className: "versionline"
-  }, "Razão versão ", APP_VERSION, " · ", fmtDateBR(APP_BUILD))), /*#__PURE__*/React.createElement(Sheet, {
-    open: settingsOpen,
-    onClose: () => setSettingsOpen(false),
-    title: "Configurações"
-  }, /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {
     className: "sub",
     style: {
       marginBottom: 6
@@ -4813,11 +4735,126 @@ function App() {
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "excluir",
     size: 14
-  }), " Apagar transações, contas e cartões")), /*#__PURE__*/React.createElement(Sheet, {
+  }), " Apagar transações, contas e cartões"), /*#__PURE__*/React.createElement("div", {
+    className: "sheetdivider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 8
+    }
+  }, "Backup dos dados"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "sbtn",
+    onClick: () => exportData()
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "baixar",
+    size: 14
+  }), " Exportar backup (.json)"), /*#__PURE__*/React.createElement("button", {
+    className: "sbtn",
+    onClick: exportCSV
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "baixar",
+    size: 14
+  }), " Exportar dados (.csv)"), /*#__PURE__*/React.createElement("button", {
+    className: "sbtn",
+    onClick: () => fileRef.current?.click()
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "enviar",
+    size: 14
+  }), " Importar backup")), sb && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "sheetdivider"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "sub",
+    style: {
+      marginBottom: 8
+    }
+  }, "Conta"), session && /*#__PURE__*/React.createElement("div", {
+    className: "kv"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "kk"
+  }, "Conectado como"), /*#__PURE__*/React.createElement("span", {
+    className: "vv",
+    style: {
+      wordBreak: "break-all"
+    }
+  }, session.user.email)), /*#__PURE__*/React.createElement("button", {
+    className: "sbtn danger",
+    style: {
+      marginTop: 10
+    },
+    onClick: signOut
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "sair",
+    size: 14
+  }), " Sair da conta")))))), /*#__PURE__*/React.createElement("nav", {
+    className: "bottomnav",
+    "aria-label": "Navegação"
+  }, (() => {
+    const sec = NAV_SECTIONS.find(x => x.key === "home");
+    return /*#__PURE__*/React.createElement("button", {
+      className: curSection.key === sec.key ? "on" : "",
+      onClick: () => goSection(sec),
+      "aria-label": sec.label
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: sec.icon,
+      size: 20
+    }), /*#__PURE__*/React.createElement("span", null, sec.label));
+  })(), (() => {
+    const sec = NAV_SECTIONS.find(x => x.key === "gastos");
+    return /*#__PURE__*/React.createElement("button", {
+      className: curSection.key === sec.key ? "on" : "",
+      onClick: () => goSection(sec),
+      "aria-label": sec.label
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: sec.icon,
+      size: 20
+    }), /*#__PURE__*/React.createElement("span", null, sec.label));
+  })(), /*#__PURE__*/React.createElement("button", {
+    className: "fab",
+    ref: fabRef,
+    "aria-label": "Novo movimento",
+    onClick: openAdd
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "adicionar",
+    size: 22
+  })), (() => {
+    const sec = NAV_SECTIONS.find(x => x.key === "orcamento");
+    return /*#__PURE__*/React.createElement("button", {
+      className: curSection.key === sec.key ? "on" : "",
+      onClick: () => goSection(sec),
+      "aria-label": sec.label
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: sec.icon,
+      size: 20
+    }), /*#__PURE__*/React.createElement("span", null, sec.label));
+  })(), (() => {
+    const sec = NAV_SECTIONS.find(x => x.key === "investimentos");
+    return /*#__PURE__*/React.createElement("button", {
+      className: curSection.key === sec.key ? "on" : "",
+      onClick: () => goSection(sec),
+      "aria-label": sec.label
+    }, /*#__PURE__*/React.createElement(Icon, {
+      name: sec.icon,
+      size: 20
+    }), /*#__PURE__*/React.createElement("span", null, sec.label));
+  })()), /*#__PURE__*/React.createElement("button", {
+    className: "fabfloat",
+    ref: fabDeskRef,
+    "aria-label": "Novo movimento",
+    onClick: openAdd
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: "adicionar",
+    size: 20
+  }), /*#__PURE__*/React.createElement("span", null, "Novo movimento")), /*#__PURE__*/React.createElement(Sheet, {
     open: sheetOpen,
     onClose: () => setSheetOpen(false),
     title: sheetEditTx ? "Editar lançamento" : "Novo lançamento",
-    returnFocusRef: fabRef
+    returnFocusRef: isDesktop ? fabDeskRef : fabRef
   }, /*#__PURE__*/React.createElement(TransactionForm, {
     accounts: accounts,
     txs: txs,
@@ -5534,22 +5571,14 @@ function Balanco({
   const [aiSummary, setAiSummary] = useState("");
   const [aiSummaryBusy, setAiSummaryBusy] = useState(false);
   const [aiSummaryError, setAiSummaryError] = useState("");
-  const [inlineEditTx, setInlineEditTx] = useState(null);
   useEffect(() => {
     setAiSummary("");
     setAiSummaryError("");
   }, [monthLabel]);
-  const [inlinePropagateIds, setInlinePropagateIds] = useState([]);
   function requestEdit(t) {
     function proceed(propagateIds) {
-      if (isDesktop) {
-        setInlineEditTx(t);
-        setInlinePropagateIds(propagateIds);
-        window.scrollTo({
-          top: 0,
-          behavior: "smooth"
-        });
-      } else onEditMobile(t, propagateIds);
+      // celular e computador editam no mesmo modal do "novo movimento" (antes o computador editava num formulário fixo no topo)
+      onEditMobile(t, propagateIds);
     }
     if (t.seriesId) {
       askSeriesScope({
@@ -5596,7 +5625,6 @@ function Balanco({
       });
     }, 6000);
     ids.forEach(id => pendingTimers.current.set(id, timer));
-    if (inlineEditTx && ids.includes(inlineEditTx.id)) setInlineEditTx(null);
     const label = ids.length > 1 ? `${ids.length} lançamentos excluídos.` : `"${primaryTx.description || primaryTx.category || TYPES[primaryTx.type].label}" excluído.`;
     toast(label, "default", {
       duration: 6000,
@@ -5972,19 +6000,7 @@ ${AI_SUMMARY_STYLE}`;
     style: {
       color: "var(--inv)"
     }
-  }, brl(displayTotals.inv))))), /*#__PURE__*/React.createElement(TransactionForm, {
-    accounts: accounts,
-    txs: txs,
-    update: update,
-    editTx: inlineEditTx,
-    propagateIds: inlinePropagateIds,
-    onDone: () => {
-      setInlineEditTx(null);
-      setInlinePropagateIds([]);
-    },
-    categoryMemory: categoryMemory,
-    key: inlineEditTx ? inlineEditTx.id : "new"
-  })), (displayTotals.inc > 0 || displayTotals.exp > 0 || displayTotals.inv > 0) && /*#__PURE__*/React.createElement("div", {
+  }, brl(displayTotals.inv)))))), (displayTotals.inc > 0 || displayTotals.exp > 0 || displayTotals.inv > 0) && /*#__PURE__*/React.createElement("div", {
     className: "card g-6"
   }, /*#__PURE__*/React.createElement("h3", null, "Análise do mês ", /*#__PURE__*/React.createElement("button", {
     className: "sbtn",
@@ -6299,7 +6315,7 @@ ${AI_SUMMARY_STYLE}`;
   }) : Object.keys(grouped).length === 0 && /*#__PURE__*/React.createElement(EmptyState, {
     icon: "documento",
     title: `Nenhum lançamento em ${monthLabel}`,
-    text: isDesktop ? "Preencha o formulário aqui em cima para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo." : "Toque no botão + para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo.",
+    text: isDesktop ? "Use o botão \"Novo movimento\" no canto da tela para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo." : "Toque no botão + para registrar um lançamento — ou mande de uma vez os PDFs do banco e do cartão e deixe a IA preencher tudo.",
     action: {
       label: "Importar extratos e faturas",
       icon: "brilho",
@@ -7358,7 +7374,7 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
     style: {
       marginBottom: 0
     }
-  }, "Clique numa categoria pra ver os lançamentos no Balanço."), /*#__PURE__*/React.createElement("div", {
+  }, "Clique numa categoria pra ver os lançamentos em Gastos."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 18,
@@ -7388,7 +7404,7 @@ Valores no formato R$ 1.234,56. Nunca invente um gasto que não esteja no JSON.`
     style: {
       marginBottom: 0
     }
-  }, "Somado a partir das #tags usadas na descrição dos lançamentos. Clique numa tag pra ver os lançamentos no Balanço."), /*#__PURE__*/React.createElement("div", {
+  }, "Somado a partir das #tags usadas na descrição dos lançamentos. Clique numa tag pra ver os lançamentos em Gastos."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 18,
@@ -10788,7 +10804,7 @@ function Extrato({
         marginBottom: 8,
         color: "var(--pos)"
       }
-    }, "Conta criada automaticamente para esta conexão. Pode renomear em Contas quando quiser."), doc.meta?.fonte === "pluggy" && /*#__PURE__*/React.createElement("p", {
+    }, "Conta criada automaticamente para esta conexão. Pode renomear em Configurações › Contas e bancos quando quiser."), doc.meta?.fonte === "pluggy" && /*#__PURE__*/React.createElement("p", {
       className: "hint",
       style: {
         marginTop: 0,
@@ -11290,8 +11306,8 @@ function SwipeDiagram() {
   }))));
 }
 function BottomNavDiagram() {
-  const left = [["Panorama", 40], ["Balanço", 110]];
-  const right = [["Orçamento", 250], ["Mais", 310]];
+  const left = [["Home", 40], ["Gastos", 110]];
+  const right = [["Orçamento", 250], ["Investimentos", 310]];
   return /*#__PURE__*/React.createElement("svg", {
     viewBox: "0 0 350 76",
     width: "100%",
@@ -11425,8 +11441,8 @@ const HELP_SECTIONS = [{
 }, {
   id: "panorama-ajuda",
   n: 11,
-  title: "Panorama",
-  kw: "panorama patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"
+  title: "Home",
+  kw: "home resumo panorama patrimônio comprometimento parcelamento indicador tag gasto por tag banco central"
 }, {
   id: "backup-seguranca",
   n: 12,
@@ -11534,16 +11550,16 @@ const TOUR_STEPS = [{
   text: "Baixe os PDFs do mês no site do seu banco e do seu cartão e jogue todos de uma vez em \"Importar do banco\". A IA descobre de qual banco é cada arquivo, separa gasto, entrada, pagamento de fatura e transferência entre bancos — você só confere e importa."
 }, {
   title: "Ou registre na mão, quando preferir",
-  text: "Gastos, ganhos, investimentos e transferências — use o botão de adicionar (o + central no celular, ou o formulário no topo do Balanço no computador)."
+  text: "Gastos, ganhos, investimentos e transferências — use o botão de adicionar (o + central no celular, ou o botão \"Novo movimento\" no canto da tela, no computador)."
 }, {
-  title: "Acompanhe pelo Panorama e Balanço",
-  text: "O Panorama mostra o histórico completo desde o início; o Balanço mostra mês a mês, com gráficos e orçamento."
+  title: "Acompanhe pela Home e por Gastos",
+  text: "A Home mostra o resumo e o histórico completo desde o início; Gastos mostra mês a mês, com gráficos, busca e filtros."
 }, {
   title: "Nomeie suas contas com o banco de verdade",
   text: "Em Contas, troque \"Conta principal\" pelo nome real (Nubank, Itaú, Inter). É por esse nome que a importação reconhece sozinha de quem é cada PDF. Aproveite e configure fechamento e vencimento dos cartões: assim um gasto no cartão conta na fatura do mês certo, não no mês da compra."
 }, {
   title: "Precisa de ajuda?",
-  text: "A aba Ajuda tem um manual completo com exemplos ao vivo, e o ícone \"?\" nos cartões principais leva direto pra seção certa."
+  text: "A Ajuda (em Configurações) tem um manual completo com exemplos ao vivo, e o ícone \"?\" nos cartões principais leva direto pra seção certa."
 }];
 function WelcomeTour() {
   const [open, setOpen] = useState(false);
@@ -11782,7 +11798,7 @@ function Ajuda({
     title: "Transferências",
     purpose: "Mover dinheiro entre suas próprias contas, e como isso paga a fatura do cartão.",
     steps: ["Escolha o tipo Transferência, a conta de origem e a de destino.", "Uma transferência não conta como gasto nem ganho no seu total do mês — ela só move saldo entre contas.", "Pra pagar a fatura do cartão: transfira da conta corrente para o cartão, no valor da fatura."],
-    tip: "Transferir para o cartão reduz o valor da fatura em aberto na hora — dá pra conferir em Contas."
+    tip: "Transferir para o cartão reduz o valor da fatura em aberto na hora — dá pra conferir em Configurações › Contas e bancos."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "lançamento de transferência"
   }, /*#__PURE__*/React.createElement(TxRow, {
@@ -11879,7 +11895,7 @@ function Ajuda({
     n: 7,
     title: "Investimentos",
     purpose: "Cadastrar sua carteira, acompanhar aportes, proventos e indicadores de mercado.",
-    steps: ["Cadastre cada ativo com o valor aplicado e o valor atual — a diferença é o rendimento.", "Lançamentos do tipo Investimento contam como aporte do mês; do tipo Ganho na categoria \"Proventos\" contam como provento.", "Selic, CDI e IPCA (Banco Central) aparecem no Panorama, atualizados uma vez por dia.", "Independência Financeira mostra quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios."],
+    steps: ["Cadastre cada ativo com o valor aplicado e o valor atual — a diferença é o rendimento.", "Lançamentos do tipo Investimento contam como aporte do mês; do tipo Ganho na categoria \"Proventos\" contam como provento.", "Selic, CDI e IPCA (Banco Central) aparecem na Home, atualizados uma vez por dia.", "Independência Financeira mostra quanto os proventos médios dos últimos 6 meses cobririam dos seus gastos médios."],
     tip: "100% de Independência Financeira significa: se você parasse de trabalhar, os proventos médios sozinhos cobririam seus gastos médios."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "composição da carteira"
@@ -11906,8 +11922,8 @@ function Ajuda({
     n: 8,
     title: "Importar do banco",
     purpose: "Fechar o mês inteiro de uma vez: conecte o banco pelo Open Finance ou jogue aqui todos os documentos dos seus bancos, cartões e corretora — a IA lê, identifica e classifica tudo.",
-    steps: ["Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.", "A conta e o cartão de cada banco conectado são criados sozinhos na primeira sincronização — não precisa cadastrar nada em Contas antes. Nas sincronizações seguintes, o app reconhece o mesmo banco pelo número da conta/cartão, sem criar duplicata.", "Não precisa lembrar de clicar em Atualizar: toda vez que você abre esta aba, qualquer conexão sem sincronizar há mais de 20 horas atualiza sozinha. Isso só acontece com a aba aberta — o app não roda em segundo plano com o celular fechado, e nada é importado sem passar pela sua revisão.", "Se os seus bancos já estão conectados no Meu Pluggy (meu.pluggy.ai), use \"Já uso o Meu Pluggy\": cole o itemId de cada conexão e pronto, sem passar pela tela de conectar de novo. O app confere o id antes de guardar. Vale lembrar que o itemId precisa ter sido criado pela mesma aplicação do Pluggy configurada no servidor.", "Atualizar duas vezes no mesmo mês não duplica nada: cada lançamento importado guarda o id que tem no Pluggy, e o que já entrou é ignorado na busca seguinte — o app avisa quantos ficaram de fora.", "Conectado o banco, o resto da tela continua valendo para o que o Open Finance não cobre: notas de corretagem, recibos, prints e bancos que você não quer conectar.", "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.", "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.", "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
-    tip: "Se a IA estiver fora do ar ou sem cota, o PDF ainda é lido localmente pelo leitor embutido (só reconhece gasto e ganho, sem identificar banco nem transferência). Em Configurações dá para trocar o motor de IA entre Rápido e Cuidadoso — vale mudar para Cuidadoso quando alguma fatura vier com muitas linhas erradas. Arquivos acima de 3 MB podem não caber numa leitura só."
+    steps: ["Open Finance (o caminho curto): no cartão do topo, conecte o banco uma vez. A senha é digitada na tela do próprio Pluggy, o Razão nunca a vê, e o acesso é só de leitura. Depois é só clicar em Atualizar e os lançamentos chegam sem PDF nenhum, já separados entre conta e cartão. Se o botão não aparecer, falta configurar as credenciais do Pluggy no servidor — a própria tela explica o passo a passo.", "A conta e o cartão de cada banco conectado são criados sozinhos na primeira sincronização — não precisa cadastrar nada em Contas e bancos antes. Nas sincronizações seguintes, o app reconhece o mesmo banco pelo número da conta/cartão, sem criar duplicata.", "Não precisa lembrar de clicar em Atualizar: toda vez que você abre esta aba, qualquer conexão sem sincronizar há mais de 20 horas atualiza sozinha. Isso só acontece com a aba aberta — o app não roda em segundo plano com o celular fechado, e nada é importado sem passar pela sua revisão.", "Se os seus bancos já estão conectados no Meu Pluggy (meu.pluggy.ai), use \"Já uso o Meu Pluggy\": cole o itemId de cada conexão e pronto, sem passar pela tela de conectar de novo. O app confere o id antes de guardar. Vale lembrar que o itemId precisa ter sido criado pela mesma aplicação do Pluggy configurada no servidor.", "Atualizar duas vezes no mesmo mês não duplica nada: cada lançamento importado guarda o id que tem no Pluggy, e o que já entrou é ignorado na busca seguinte — o app avisa quantos ficaram de fora.", "Conectado o banco, o resto da tela continua valendo para o que o Open Finance não cobre: notas de corretagem, recibos, prints e bancos que você não quer conectar.", "Arraste (ou escolha) TODOS os documentos do mês de uma vez: extratos, faturas de cartão, notas de corretagem e recibos. Vale PDF, foto e print de tela do app do banco — um print é lido como documento inteiro, não como um lançamento só.", "Enquanto a IA lê, o painel mostra em que documento ela está, a fase da leitura e a porcentagem de conclusão da fila inteira.", "Para cada arquivo, a IA decide o que ele é, de qual banco vem, e casa com a conta ou cartão que você já cadastrou. Na primeira vez você pode precisar corrigir a conta; ao importar, o app guarda o número da conta/cartão daquele documento e passa a reconhecer sozinho nos meses seguintes.", "Precisa trocar a conta de vários lançamentos? A barra no topo da revisão aplica conta (ou categoria) em todos os itens marcados de uma vez, mesmo entre documentos diferentes. O seletor no cabeçalho de cada documento troca só os dele.", "Nota de corretagem: cada ativo comprado vira um aporte na data de liquidação (quando o dinheiro sai de verdade), as taxas viram um gasto, e aparece um painel para mandar os ativos direto para a sua carteira em Investimentos.", "Cada linha vira um tipo: gasto, ganho, investimento ou transferência. Pagamento de fatura e transferência entre os seus bancos viram transferência (saem de uma conta e entram na outra), então não contam como gasto novo.", "Gastos que aparecem numa fatura entram no cartão daquela fatura — é isso que faz o gasto pesar no mês em que a fatura vence, e não no dia da compra.", "Revise: desmarque o que não quiser, ajuste conta, tipo e categoria. Depois importe tudo com um clique, ou documento por documento.", "Duplicatas vêm desmarcadas sozinhas — tanto as que já existem no seu histórico quanto as que aparecem em dois documentos (o caso clássico: o pagamento da fatura, que sai no extrato da conta e chega na fatura do cartão).", "Em Contas, o botão de auditoria de fatura ainda existe, para conferir um cartão específico contra o que já está registrado."],
+    tip: "Se a IA estiver fora do ar ou sem cota, o PDF ainda é lido localmente pelo leitor embutido (só reconhece gasto e ganho, sem identificar banco nem transferência). Em Configurações › Preferências dá para trocar o motor de IA entre Rápido e Cuidadoso — vale mudar para Cuidadoso quando alguma fatura vier com muitas linhas erradas. Arquivos acima de 3 MB podem não caber numa leitura só."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "a IA lendo a fila de documentos"
   }, /*#__PURE__*/React.createElement("div", {
@@ -12014,7 +12030,7 @@ function Ajuda({
     n: 10,
     title: "Busca e filtros",
     purpose: "Encontrar lançamentos específicos em todo o histórico, não só no mês exibido.",
-    steps: ["No Balanço, digite na busca por descrição ou por #tag — o resultado aparece enquanto você digita.", "Abra Filtros pra combinar conta, tipo, categoria, tags, intervalo de datas, status (previsto/realizado) e faixa de valor.", "Cada filtro ativo vira um chip removível; \"Limpar tudo\" reseta de uma vez.", "Clicar numa categoria no gráfico, ou numa tag na lista, também aplica o filtro correspondente."],
+    steps: ["Em Gastos, digite na busca por descrição ou por #tag — o resultado aparece enquanto você digita.", "Abra Filtros pra combinar conta, tipo, categoria, tags, intervalo de datas, status (previsto/realizado) e faixa de valor.", "Cada filtro ativo vira um chip removível; \"Limpar tudo\" reseta de uma vez.", "Clicar numa categoria no gráfico, ou numa tag na lista, também aplica o filtro correspondente."],
     tip: "O contador de resultados e a soma aparecem junto da busca, sempre que algum filtro está ativo."
   }, /*#__PURE__*/React.createElement(HelpExample, {
     label: "filtros ativos como chips"
@@ -12044,7 +12060,7 @@ function Ajuda({
   })))))), visible("panorama-ajuda") && /*#__PURE__*/React.createElement(HelpSection, {
     id: "panorama-ajuda",
     n: 11,
-    title: "Panorama",
+    title: "Home",
     purpose: "A visão consolidada de todos os meses e contas, com os indicadores extras.",
     steps: ["Saldo por conta soma tudo desde o início; Patrimônio estimado soma contas (sem cartão) + carteira de investimentos.", "Histórico de patrimônio guarda um retrato automático do total ao fim de cada mês, num gráfico.", "Contas a pagar e lembretes lista o que está previsto pra vencer nos próximos 7 dias, ou já atrasado.", "Gasto por tag soma, em todo o período, o quanto foi gasto em lançamentos marcados com cada #tag.", "Recap automático: a IA resume sozinha a semana e o mês assim que eles terminam, sem precisar pedir."],
     tip: "Independência Financeira, indicadores do Banco Central e o recap automático dependem de ter histórico e/ou internet — sem isso, esses cartões simplesmente não aparecem."
