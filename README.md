@@ -83,9 +83,22 @@ em vez de repetido. Sem internet, espera a conexão voltar.
 | `APP_URL` | link "Abrir o Razão" no e-mail | opcional |
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | apontar para outro projeto Supabase | opcional (padrão: o de produção) |
 
+### Supabase gratuito: contra a pausa por inatividade
+
+O plano gratuito pausa o projeto depois de 7 dias sem atividade. Dois agendadores independentes gravam
+um batimento no banco todo dia pela função `keepalive_ping`:
+
+- o cron da Vercel em `/api/keepalive` (03:00 UTC), que responde 502 se o Supabase falhar (aparece em
+  Vercel › Logs);
+- o GitHub Actions `.github/workflows/keepalive.yml` (15:17 UTC), que fica vermelho e manda e-mail se
+  falhar. Dá para rodar na mão em Actions › Supabase keepalive › Run workflow.
+
+Se mesmo assim o projeto pausar: painel do Supabase › Resume project. Nenhum dado se perde.
+
 ### Banco de dados (uma vez)
 
-Rode `supabase/migrations/20261007000000_tabelas_relacionais.sql` no SQL Editor do Supabase. Ele cria
+Os arquivos de `supabase/migrations/` rodam em ordem no SQL Editor. Em produção, só o do keepalive
+(`20261007010000_keepalive.sql`) está aplicado. O de tabelas relacionais (`20261007000000_…`) é opcional e cria
 `bank_accounts`, `movements` e `budgets` com RLS (cada usuário só vê o que é seu) e liga o tempo real.
 O registro principal continua em `finance_data`; o app mantém as tabelas sincronizadas sozinho. Antes de
 rodar o SQL o app funciona normalmente — só sem as tabelas relacionais e sem o recarregamento instantâneo

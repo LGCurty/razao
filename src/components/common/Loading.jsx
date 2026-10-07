@@ -33,6 +33,7 @@ function LoadErrorScreen({ message, onRetry, onSignOut }){
         <div className="bigicon" style={{display:"flex",justifyContent:"center",marginBottom:16,color:"var(--neg)"}}><Icon name="alerta" size={40}/></div>
         <h2 style={{fontFamily:"'Sora',sans-serif",fontSize:20,marginBottom:8}}>Não foi possível carregar seus dados</h2>
         <p style={{color:"var(--text-mut)",fontSize:14,marginBottom:10,lineHeight:1.5}}>Isso costuma ser uma falha de conexão temporária. Seus dados salvos não foram apagados — tentar de novo deve resolver.</p>
+        <p style={{color:"var(--text-mut)",fontSize:13,marginBottom:10,lineHeight:1.5}}>Se continuar por mais de alguns minutos, o banco de dados pode ter sido pausado pelo Supabase. Abra o painel em supabase.com/dashboard e clique em "Resume project" — nada se perde.</p>
         <p className="mono" style={{fontSize:11,color:"var(--text-mut)",opacity:.7,marginBottom:24,wordBreak:"break-word"}}>{message}</p>
         <div style={{display:"flex",gap:10,justifyContent:"center"}}>
           <button className="sbtn primary" onClick={onRetry}>Tentar de novo</button>

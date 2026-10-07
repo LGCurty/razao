@@ -65,7 +65,7 @@ create table if not exists public.budgets (
 );
 
 -- ---------------------------------------------------------------- updated_at automático
-create or replace function public.razao_set_updated_at() returns trigger language plpgsql as $$
+create or replace function public.razao_set_updated_at() returns trigger language plpgsql set search_path = '' as $$
 begin new.updated_at = now(); return new; end $$;
 do $$
 declare t text;
@@ -85,7 +85,7 @@ declare t text;
 begin
   foreach t in array array['bank_accounts','movements','budgets'] loop
     execute format('drop policy if exists "dono le e grava" on public.%I', t);
-    execute format('create policy "dono le e grava" on public.%I for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id)', t);
+    execute format('create policy "dono le e grava" on public.%I for all to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id)', t);
   end loop;
 end $$;
 

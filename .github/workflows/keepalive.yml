@@ -1,0 +1,45 @@
+# Segundo agendador contra a pausa do Supabase gratuito (7 dias sem atividade), independente do cron
+# da Vercel (/api/keepalive). Grava um batimento no banco pela função keepalive_ping
+# (supabase/migrations/20261007010000_keepalive.sql). Se falhar, a execução fica vermelha e o GitHub
+# avisa por e-mail.
+#
+# A URL e a chave anônima são públicas (estão no app servido a qualquer visitante) e só permitem
+# chamar a função, que não lê nem expõe dado nenhum.
+name: Supabase keepalive
+
+on:
+  schedule:
+    - cron: "17 15 * * *"   # todo dia às 15:17 UTC (12:17 em Brasília), longe do cron da Vercel (03:00 UTC)
+  workflow_dispatch:
+
+permissions:
+  actions: write   # para reativar o próprio agendamento (ver último passo)
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_URL: https://xgdigegpxnoybklmyeyq.supabase.co
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhnZGlnZWdweG5veWJrbG15ZXlxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1NjA4MTQsImV4cCI6MjEwMDEzNjgxNH0.o9JxnQi-lj_BC_Ja6KZ9dxUyQUBO5ay6nIml5xqim6U
+    steps:
+      - name: Grava o batimento no banco
+        run: |
+          for tentativa in 1 2 3; do
+            code=$(curl -s -o resposta.json -w "%{http_code}" -X POST "$SUPABASE_URL/rest/v1/rpc/keepalive_ping" \
+              -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+              -H "Content-Type: application/json" -d '{"origem":"github-actions"}')
+            echo "tentativa $tentativa: HTTP $code $(cat resposta.json)"
+            [ "$code" = "200" ] && exit 0
+            sleep 20
+          done
+          echo "::error::Supabase não respondeu ao keepalive. O projeto pode estar pausado: abra o painel e clique em Resume."
+          exit 1
+
+      # Em repositório público, o GitHub desliga agendamentos depois de 60 dias sem commits.
+      # Reativar o próprio workflow a cada execução zera essa contagem.
+      - name: Mantém o agendamento ativo
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keepalive.yml/enable" || true

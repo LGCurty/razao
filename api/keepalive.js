@@ -1,7 +1,7 @@
 /* Mantém o projeto do Supabase acordado — o plano gratuito pausa o projeto depois de 7 dias sem
-   nenhuma chamada à API. Este endpoint faz uma consulta mínima de verdade (não só um "health check")
-   uma vez por dia, agendado pela Vercel (ver vercel.json na raiz do projeto), para o relógio de
-   inatividade nunca completar os 7 dias.
+   atividade. Este endpoint grava um batimento no banco uma vez por dia, agendado pela Vercel (ver
+   vercel.json na raiz do projeto), para o relógio de inatividade nunca completar os 7 dias. Um segundo
+   agendador independente (.github/workflows/keepalive.yml) faz o mesmo, caso o cron da Vercel falhe.
 
    Não precisa de nenhuma variável de ambiente nova: usa a mesma URL e a mesma chave anônima que já
    estão no index.html (são públicas por natureza — o app inteiro roda com elas no navegador). */
@@ -23,11 +23,18 @@ module.exports = async (req, res) => {
     }
   }
   try {
-    // uma leitura real de 1 linha na tabela — é isso que o Supabase registra como atividade do
-    // projeto (diferente de um simples "health check", que às vezes nem toca o banco)
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/finance_data?select=user_id&limit=1`, {
-      headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    // uma GRAVAÇÃO real no banco (função keepalive_ping, ver supabase/migrations/…_keepalive.sql).
+    // A leitura anônima em finance_data que ficava aqui volta vazia por causa do RLS e não impediu a
+    // pausa; ela continua só como reserva, caso a função ainda não tenha sido criada no banco.
+    const cab = { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, "Content-Type": "application/json" };
+    let r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/keepalive_ping`, {
+      method: "POST", headers: cab, body: JSON.stringify({ origem: "vercel-cron" }),
     });
+    let via = "keepalive_ping";
+    if (r.status === 404) {
+      r = await fetch(`${SUPABASE_URL}/rest/v1/finance_data?select=user_id&limit=1`, { headers: cab });
+      via = "leitura";
+    }
     // dia 1 (UTC — o cron roda às 03h UTC, meia-noite em Brasília): aproveita a mesma chamada agendada
     // para mandar o resumo do mês que fechou, sem precisar de um segundo cron no vercel.json
     let resumo = null;
@@ -35,7 +42,9 @@ module.exports = async (req, res) => {
       try { resumo = await enviarResumos({ env: process.env }); }
       catch (e) { resumo = { ok: false, error: e.message || "Falha ao enviar os resumos." }; }
     }
-    res.status(200).json({ ok: r.ok, status: r.status, at: new Date().toISOString(), resumo });
+    // falha do Supabase vira erro de verdade (502), e não um 200 com ok:false que ninguém vê: assim
+    // aparece em Vercel → Logs / Cron Jobs como execução com falha
+    res.status(r.ok ? 200 : 502).json({ ok: r.ok, status: r.status, via, at: new Date().toISOString(), resumo });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message || "Falha ao pingar o Supabase." });
   }
